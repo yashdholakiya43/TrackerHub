@@ -598,7 +598,8 @@ allDays.forEach(d => {
     ${lineChart([
       {data:target,color:"var(--text-2)",bold:true,dash:false,faint:true,name:"pace"},
       {data:actual,color:"#12B5A4",fill:true,name:"you"}
-    ], d14.map(d=>fmtShort(d)), {h:220})}
+   ], chartLabels, {h:220})
+
     <div class="legend">
       <span><i style="background:#12B5A4"></i>Your cumulative questions</span>
       <span><i style="background:var(--text-2);height:3.6px"></i>Required pace line</span>
