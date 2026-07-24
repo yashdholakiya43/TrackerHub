@@ -434,19 +434,33 @@ function renderHome(){
   const statusQ = e.deltaQ>=0 ? "good":"bad";
   const days5=lastNDays(5);
 
-  // 14-day pace chart data
-  const d14=lastNDays(14);
-  let cum=(S.settings.uwStart||0);
-  const before=Object.entries(S.qlogs).filter(([k])=>k<d14[0]).reduce((a,[,v])=>a+(+v.q||0),0);
-  cum+=before;
-  const actual=[], target=[];
-  const perDay=(e.totalQ-(S.settings.uwStart||0))/e.totalDays;
-  d14.forEach(d=>{
-    cum+=+((S.qlogs[d]||{}).q||0);
-    actual.push(cum);
-    const el2=clamp(diffD(e.start,d),0,e.totalDays);
-    target.push((S.settings.uwStart||0)+perDay*el2);
-  });
+// Dynamic range from start date up to exam deadline
+const startDate = e.start || today();
+const endDate = e.deadline || e.exam || today();
+
+const allDays = [];
+let curr = startDate;
+while(curr <= endDate && allDays.length < 500) {
+    allDays.push(curr);
+    curr = addD(curr, 1);
+}
+
+let cum = (S.settings.uwStart || 0);
+const before = Object.entries(S.qlogs).filter(([k]) => k < allDays[0]).reduce((a, [, v]) => a + (+v.q || 0), 0);
+cum += before;
+
+const actual = [], target = [], chartLabels = [];
+const perDay = (e.totalQ - (S.settings.uwStart || 0)) / Math.max(1, e.totalDays);
+
+allDays.forEach(d => {
+    cum += +((S.qlogs[d]||{}).q || 0);
+    actual.push(d <= today() ? cum : null); // Only show actual progress up to today
+    
+    const el2 = clamp(diffD(e.start, d), 0, e.totalDays);
+    target.push((S.settings.uwStart||0) + perDay * el2);
+    chartLabels.push(fmtShort(d));
+});
+
 
   const nbmeLast=[...S.nbme].sort((a,b)=>b.date.localeCompare(a.date))[0];
 
@@ -516,24 +530,33 @@ function renderHome(){
     <div class="card-h"><h3>${I("layers",{s:17,c:"var(--violet)"})} Last 5 days</h3>
       <span class="sub">goal ${e.goalQ} Q/day</span></div>
     <div class="d5">
-      ${days5.map(d=>{
-        const q=+((S.qlogs[d]||{}).q||0);
-        const ratio=e.goalQ? q/e.goalQ : 0;
-        const p=clamp(ratio*100,0,100);
-        const over = ratio>=1.15, hit = ratio>=1, part = q>0 && ratio<1;
-        const col = over ? "linear-gradient(90deg,var(--indigo),var(--violet))"
-                  : hit  ? "linear-gradient(90deg,var(--teal),var(--teal-2))"
-                  : part ? "linear-gradient(90deg,var(--amber),var(--coral-2))"
-                  : "var(--stroke-2)";
-        const txt = over ? "var(--violet)" : hit ? "var(--teal-2)" : part ? "var(--amber)" : "var(--text-3)";
-        const pct = e.goalQ ? Math.round(ratio*100) : 0;
-        return `<div class="c">
-          <div class="dd">${dowShort(d)}<br><span style="opacity:.7;font-weight:600">${parse(d).getDate()} ${MON[parse(d).getMonth()]}</span></div>
-          <div class="bar ${over?"over":""}"><span style="width:${p}%;background:${col}"></span></div>
-          <div class="qq" style="color:${txt}">${q}</div>
-          <div class="pct" style="color:${txt};opacity:.85">${q?pct+"%":"—"}</div>
-        </div>`;
-      }).join("")}
+     ${days5.map(d=>{
+    const h = dayHours(d);
+    const q = ((S.qlogs[d]||{}).q||0);
+    const dailyGoalSec = (S.settings.dailyHourGoal || 6) * 3600;
+    
+    let statusClass = "remaining";
+    let statusLabel = `${hLabel(h)} left`;
+    
+    if (h >= dailyGoalSec * 1.1) {
+        statusClass = "crossed";
+        statusLabel = `Crossed (+${hLabel(h - dailyGoalSec)})`;
+    } else if (h >= dailyGoalSec) {
+        statusClass = "reached";
+        statusLabel = "Goal Reached";
+    }
+
+    const pctVal = clamp((h / dailyGoalSec) * 100, 0, 100);
+    const barCol = statusClass === 'crossed' ? 'var(--teal-2)' : statusClass === 'reached' ? 'var(--teal)' : 'var(--amber)';
+
+    return `<div class="c ${statusClass}">
+        <div class="dd">${dowShort(d)}<br><span style="opacity:.7;font-weight:600">${parse(d).getDate()} ${MON[parse(d).getMonth()]}</span></div>
+        <div class="bar" style="height:11px"><span style="width:${pctVal}%;background:${barCol}"></span></div>
+        <div class="qq">${q} Q</div>
+        <div class="pct">${statusLabel}</div>
+    </div>`;
+}).join("")}
+
     </div>
     <div class="plegend" style="margin-top:14px">
       <span><i style="background:linear-gradient(90deg,var(--indigo),var(--violet))"></i>Beat goal</span>
