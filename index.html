@@ -227,6 +227,14 @@ html[data-theme="light"] .pill.info{color:#3D4FE0}
 .d5 .over{position:relative}
 .d5 .over::after{content:"";position:absolute;right:2px;top:50%;transform:translateY(-50%);
   width:4px;height:4px;border-radius:50%;background:#fff;opacity:.9}
+.d5 .c.crossed .pct { color: var(--teal-2); font-weight: 800; }
+.d5 .c.reached .pct { color: var(--teal); font-weight: 700; }
+.d5 .c.remaining .pct { color: var(--amber); font-weight: 600; }
+
+.d5 .c.crossed .bar span {
+    background: linear-gradient(90deg, var(--teal), var(--teal-2));
+    box-shadow: 0 0 6px color-mix(in srgb, var(--teal-2) 40%, transparent);
+}
 
 /* inputs */
 label.fl{display:block;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);margin:0 0 7px}
