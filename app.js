@@ -951,6 +951,15 @@ function renderWatch(){
       <button class="${TM.kind==="stop"?"on":""}" onclick="setKind('stop')">Stopwatch</button>
     </div>
 
+  <div class="card">
+    <div class="card-h">
+      <h3>${I("watch",{s:17,c:"var(--teal-2)"})} Study clock</h3>
+      <button class="btn sec" style="padding:6px 12px;min-height:32px;font-size:12px;" onclick="openManualTimeSheet()">
+        ${I("plus",{s:14})} Log Past Time
+      </button>
+      <span class="sub">${hLabel(totToday)} today</span>
+    </div>
+
     <div class="chips" style="justify-content:center;margin-bottom:6px">
       ${Object.entries(MODES).map(([k,v])=>`
         <button class="chip ${TM.mode===k?"on":""}" ${TM.mode===k?`style="background:${v.color}"`:""} onclick="setMode('${k}')">
@@ -1491,11 +1500,99 @@ if("serviceWorker" in navigator && location.protocol.startsWith("http")){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 
+/* ============================================================
+   MANUAL TIME LOGGING FEATURE
+============================================================ */
+function openManualTimeSheet() {
+  const t = today();
+  openSheet(`
+    <div class="grab"></div>
+    <div class="card-h">
+      <h3>${I("clock", {s: 18, c: "var(--indigo-2)"})} Log Past Study Time</h3>
+      <span class="sub">Manual Entry</span>
+    </div>
+    
+    <div class="grid" style="gap: 12px;">
+      <div class="field">
+        <label class="fl">Study Mode</label>
+        <select class="inp" id="manualMode">
+          <option value="block">UWorld block</option>
+          <option value="book">First Aid</option>
+          <option value="lecture">B&B / Sketchy</option>
+        </select>
+      </div>
+
+      <div class="g2" style="gap: 10px;">
+        <div class="field">
+          <label class="fl">Hours</label>
+          <input class="inp" type="number" inputmode="numeric" id="manualHours" value="0" min="0" max="12">
+        </div>
+        <div class="field">
+          <label class="fl">Minutes</label>
+          <input class="inp" type="number" inputmode="numeric" id="manualMinutes" value="30" min="0" max="59">
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="fl">Date</label>
+        <input class="inp" type="date" id="manualDate" value="${t}">
+      </div>
+
+      <div class="field">
+        <label class="fl">Note / Label (Optional)</label>
+        <input class="inp" id="manualLabel" placeholder="e.g., Cardio review, missed tracking">
+      </div>
+
+      <div class="btnrow" style="margin-top: 8px;">
+        <button class="btn sec" onclick="closeSheet()">Cancel</button>
+        <button class="btn pri" onclick="saveManualTime()">Save Time</button>
+      </div>
+    </div>
+  `);
+}
+
+function saveManualTime() {
+  const mode = document.getElementById("manualMode").value;
+  const hrsInput = parseInt(document.getElementById("manualHours").value) || 0;
+  const minInput = parseInt(document.getElementById("manualMinutes").value) || 0;
+  const dateInput = document.getElementById("manualDate").value || today();
+  const customLabel = document.getElementById("manualLabel").value.trim();
+
+  const totalSeconds = (hrsInput * 3600) + (minInput * 60);
+
+  if (totalSeconds <= 0) {
+    toast("Please enter a valid duration", "bad");
+    return;
+  }
+
+  S.hours[dateInput] = S.hours[dateInput] || { block: 0, book: 0, lecture: 0 };
+  S.hours[dateInput][mode] = (S.hours[dateInput][mode] || 0) + totalSeconds;
+
+  const defaultLabelText = MODES[mode] ? MODES[mode].label : "Manual Entry";
+  S.sessions.push({
+    id: uid(),
+    date: dateInput,
+    mode: mode,
+    sec: totalSeconds,
+    label: customLabel ? `${customLabel} (Manual)` : `${defaultLabelText} (Manual)`
+  });
+
+  save(true);
+  closeSheet();
+  toast(`Added ${hLabel(totalSeconds)} to ${mode}`);
+  renderAll();
+}
+
 /* expose for inline handlers */
-Object.assign(window,{go,quickLog,quickSave,saveLog,delLog,bump,bumpPage,addNbme,delNbme,
-  nbmeNamePrefill,setKind,setMode,setTarget,toggleRun,finishRun,resetRun,delSession,
-  savePlan,saveSync,doUpdate,exportData,exportCSV,importData,copyData,wipe,closeSheet,confirmSheet,
-  insights,projection,consistency,subjectStats,weekSummary,heatmap,missCost,S,save,renderAll});
+Object.assign(window,{
+  go, quickLog, quickSave, saveLog, delLog, bump, bumpPage, addNbme, delNbme,
+  nbmeNamePrefill, setKind, setMode, setTarget, toggleRun, finishRun, resetRun, delSession,
+  savePlan, saveSync, doUpdate, exportData, exportCSV, importData, copyData, wipe, closeSheet, confirmSheet,
+  insights, projection, consistency, subjectStats, weekSummary, heatmap, missCost, S, save, renderAll,
+  openManualTimeSheet,
+  saveManualTime
+});
+
 
 /* ============================================================
    NEW FEATURES v3.1
