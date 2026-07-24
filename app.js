@@ -435,20 +435,41 @@ function renderHome(){
   const days5=lastNDays(5);
 
   // 14-day pace chart data
-  const d14=lastNDays(14);
-  let cum=(S.settings.uwStart||0);
-  const before=Object.entries(S.qlogs).filter(([k])=>k<d14[0]).reduce((a,[,v])=>a+(+v.q||0),0);
-  cum+=before;
-  const actual=[], target=[];
-  const perDay=(e.totalQ-(S.settings.uwStart||0))/e.totalDays;
-  d14.forEach(d=>{
-    cum+=+((S.qlogs[d]||{}).q||0);
-    actual.push(cum);
-    const el2=clamp(diffD(e.start,d),0,e.totalDays);
-    target.push((S.settings.uwStart||0)+perDay*el2);
-  });
+  // Generate a full span from your start date to your exam date
+const spanDays = [];
+const chartLabels = [];
+const totalSpan = diffD(e.start, e.exam);
 
-  const nbmeLast=[...S.nbme].sort((a,b)=>b.date.localeCompare(a.date))[0];
+for(let i = 0; i <= totalSpan; i++) {
+    const d = addD(e.start, i);
+    spanDays.push(d);
+    chartLabels.push(fmtShort(d)); // Generates the short date labels
+}
+
+let cum = (S.settings.uwStart || 0);
+// Count any activity before the official 'start' date to keep the baseline accurate
+const before = Object.entries(S.qlogs).filter(([k]) => k < e.start).reduce((a, [, v]) => a + (+v.q || 0), 0);
+cum += before;
+
+const actual = [], target = [];
+const perDay = (e.totalQ - (S.settings.uwStart || 0)) / e.totalDays;
+
+spanDays.forEach(d => {
+    // Only plot 'actual' data up to today so the line stops cleanly
+    if (d <= e.today) {
+        cum += +((S.qlogs[d] || {}).q || 0);
+        actual.push(cum);
+    } else {
+        actual.push(null); 
+    }
+    
+    // The target line always extends to the exam date
+    const el2 = clamp(diffD(e.start, d), 0, e.totalDays);
+    target.push((S.settings.uwStart || 0) + perDay * el2);
+});
+
+
+   const nbmeLast=[...S.nbme].sort((a,b)=>b.date.localeCompare(a.date))[0];
 
   el.innerHTML=`
   <!-- HERO -->
@@ -579,12 +600,13 @@ function renderHome(){
 
   <!-- CHART -->
   <div class="card">
-    <div class="card-h"><h3>${I("chart",{s:17,c:"var(--teal-2)"})} UWorld · 14 days</h3>
+    <div class="card-h"><h3>${I("chart",{s:17,c:"var(--teal-2)"})} UWorld · Full Timeline</h3>
       <span class="sub">cumulative vs required</span></div>
     ${lineChart([
       {data:target,color:"var(--text-2)",bold:true,dash:false,faint:true,name:"pace"},
       {data:actual,color:"#12B5A4",fill:true,name:"you"}
-    ], d14.map(d=>fmtShort(d)), {h:220})}
+    ], chartLabels, {h:220})}
+
     <div class="legend">
       <span><i style="background:#12B5A4"></i>Your cumulative questions</span>
       <span><i style="background:var(--text-2);height:3.6px"></i>Required pace line</span>
