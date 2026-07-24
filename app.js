@@ -525,38 +525,29 @@ allDays.forEach(d => {
       e.deltaP>=0?`${e.deltaP} pages ahead`:`${Math.abs(e.deltaP)} pages behind`)}
   </div>
 
-  <!-- LAST 5 DAYS -->
+    <!-- LAST 5 DAYS -->
   <div class="card">
     <div class="card-h"><h3>${I("layers",{s:17,c:"var(--violet)"})} Last 5 days</h3>
       <span class="sub">goal ${e.goalQ} Q/day</span></div>
     <div class="d5">
-     ${days5.map(d=>{
-    const h = dayHours(d);
-    const q = ((S.qlogs[d]||{}).q||0);
-    const dailyGoalSec = (S.settings.dailyHourGoal || 6) * 3600;
-    
-    let statusClass = "remaining";
-    let statusLabel = `${hLabel(h)} left`;
-    
-    if (h >= dailyGoalSec * 1.1) {
-        statusClass = "crossed";
-        statusLabel = `Crossed (+${hLabel(h - dailyGoalSec)})`;
-    } else if (h >= dailyGoalSec) {
-        statusClass = "reached";
-        statusLabel = "Goal Reached";
-    }
-
-    const pctVal = clamp((h / dailyGoalSec) * 100, 0, 100);
-    const barCol = statusClass === 'crossed' ? 'var(--teal-2)' : statusClass === 'reached' ? 'var(--teal)' : 'var(--amber)';
-
-    return `<div class="c ${statusClass}">
-        <div class="dd">${dowShort(d)}<br><span style="opacity:.7;font-weight:600">${parse(d).getDate()} ${MON[parse(d).getMonth()]}</span></div>
-        <div class="bar" style="height:11px"><span style="width:${pctVal}%;background:${barCol}"></span></div>
-        <div class="qq">${q} Q</div>
-        <div class="pct">${statusLabel}</div>
-    </div>`;
-}).join("")}
-
+      ${days5.map(d=>{
+        const q=+((S.qlogs[d]||{}).q||0);
+        const ratio=e.goalQ? q/e.goalQ : 0;
+        const p=clamp(ratio*100,0,100);
+        const over = ratio>=1.15, hit = ratio>=1, part = q>0 && ratio<1;
+        const col = over ? "linear-gradient(90deg,var(--indigo),var(--violet))"
+                  : hit  ? "linear-gradient(90deg,var(--teal),var(--teal-2))"
+                  : part ? "linear-gradient(90deg,var(--amber),var(--coral-2))"
+                  : "var(--stroke-2)";
+        const txt = over ? "var(--violet)" : hit ? "var(--teal-2)" : part ? "var(--amber)" : "var(--text-3)";
+        const pct = e.goalQ ? Math.round(ratio*100) : 0;
+        return `<div class="c">
+          <div class="dd">${dowShort(d)}<br><span style="opacity:.7;font-weight:600">${parse(d).getDate()} ${MON[parse(d).getMonth()]}</span></div>
+          <div class="bar ${over?"over":""}"><span style="width:${p}%;background:${col}"></span></div>
+          <div class="qq" style="color:${txt}">${q}</div>
+          <div class="pct" style="color:${txt};opacity:.85">${q?pct+"%":"—"}</div>
+        </div>`;
+      }).join("")}
     </div>
     <div class="plegend" style="margin-top:14px">
       <span><i style="background:linear-gradient(90deg,var(--indigo),var(--violet))"></i>Beat goal</span>
