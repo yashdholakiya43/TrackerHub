@@ -729,9 +729,8 @@ const tot = entries.reduce((a,v)=>({
 }), {q:0,p:0,c:0,cd:0});
 const acc = tot.cd ? (tot.c/tot.cd*100) : null;
 
-const faOpts = `<option value="">-- First Aid Topic --</option>` + FA_TOPICS.map(x=>`<option value="${x}">${x}</option>`).join("");
-const uwOpts = `<option value="">-- UWorld Topic --</option>` + UW_TOPICS.map(x=>`<option value="${x}">${x}</option>`).join("");
-
+const faOpts = `<option value="">-- Select First Aid Topic --</option>` + FA_TOPICS.map(x=>`<option value="${x}">${x}</option>`).join("");
+const uwOpts = `<option value="">-- Select UWorld Topic --</option>` + UW_TOPICS.map(x=>`<option value="${x}">${x}</option>`).join("");
 
   el.innerHTML=`
   <div class="card">
@@ -756,10 +755,18 @@ const uwOpts = `<option value="">-- UWorld Topic --</option>` + UW_TOPICS.map(x=
       </div>
     </div>
     <div class="field" style="margin-top:12px">
-      <label class="fl">Note (topic / system)</label>
-      <input class="inp" id="ln" value="${(cur.note||"").replace(/"/g,"&quot;")}" placeholder="e.g. Cardio pharm, Sketchy Micro gram+">
-    </div>
-    <div class="chips" style="margin-top:14px">
+  <label class="fl">UWorld Topic</label>
+  <select class="inp" id="quw">
+    ${uwOpts}
+  </select>
+</div>
+<div class="field" style="margin-top:12px">
+  <label class="fl">First Aid Topic</label>
+  <select class="inp" id="qfa">
+    ${faOpts}
+  </select>
+</div>
+   <div class="chips" style="margin-top:14px">
       ${[20,40,e.goalQ||40,80].filter((v,i,a)=>a.indexOf(v)===i).map(v=>
         `<button class="chip" onclick="bump(${v})">${I("plus",{s:13})} ${v} Q</button>`).join("")}
       <button class="chip" onclick="bumpPage(10)">${I("book",{s:13})} +10 pages</button>
@@ -816,10 +823,11 @@ const uwOpts = `<option value="">-- UWorld Topic --</option>` + UW_TOPICS.map(x=
                ${v.faTopic ? `<br><span style="color:var(--coral)">FA:</span> ${v.faTopic}` : ''}
             </div>
           </div>
-          <div class="end">
-            <div class="v" style="color:${col}">${q}<span style="font-size:9.5px;color:var(--text-3);font-weight:600"> Q</span></div>
-            <button class="x" onclick="delLog('${v.id}')" aria-label="Delete">${I("trash",{s:14,c:"var(--text-3)"})}</button>
-          </div>
+       <div class="end">
+  <div class="v" style="color:${col}">${q}<span style="font-size:9.5px;color:var(--text-3);font-weight:600"> Q</span></div>
+  <button class="x" onclick="editLog('${v.id}')" aria-label="Edit" style="margin-right:4px">${I("edit",{s:14,c:"var(--text-3)"})}</button>
+  <button class="x" onclick="delLog('${v.id}')" aria-label="Delete">${I("trash",{s:14,c:"var(--text-3)"})}</button>
+      </div>
         </div>`;
       }).join(""):`<div class="empty">${I("empty",{s:36})}<div>No entries yet. Log your first block above.</div></div>`}
 
@@ -836,14 +844,21 @@ function saveLog(){
   const p=+document.getElementById("lp").value||0;
   const fa=document.getElementById("qfa").value;
   const uw=document.getElementById("quw").value;
-  
+
   if(!q&&!p&&!fa&&!uw){ toast("Nothing to save", "bad"); return; }
   if(c!=null&&c>q){ toast("Correct can't exceed questions", "bad"); return; }
 
-  const entry = { id: d+"-"+Date.now(), date: d, q: q, correct: c, pages: p, faTopic: fa, uwTopic: uw };
-  S.studyLogs = S.studyLogs || [];
-  S.studyLogs.push(entry);
+  // Check if we are updating an existing entry or creating a new one
+  if (window.currentEditId) {
+    const idx = S.studyLogs.findIndex(x => x.id === window.currentEditId);
+    if (idx > -1) S.studyLogs[idx] = { id: window.currentEditId, date: d, q, correct: c, pages: p, faTopic: fa, uwTopic: uw };
+    window.currentEditId = null; // Clear the edit mode
+  } else {
+    S.studyLogs = S.studyLogs || [];
+    S.studyLogs.push({ id: d+"-"+Date.now(), date: d, q, correct: c, pages: p, faTopic: fa, uwTopic: uw });
+  }
 
+  // Rebuild the daily stats
   S.qlogs = {};
   S.studyLogs.forEach(log => {
     if(!S.qlogs[log.date]) S.qlogs[log.date] = { q:0, correct:null, pages:0, note:"" };
@@ -856,6 +871,25 @@ function saveLog(){
 
   save(true); toast(`Saved ${fmtShort(d)} · ${q} Q`); renderAll();
 }
+
+function editLog(id){
+  const log = S.studyLogs.find(x => x.id === id);
+  if(!log) return;
+  
+  // Fill the main form with the saved data
+  document.getElementById("ld").value = log.date;
+  document.getElementById("lq").value = log.q || "";
+  document.getElementById("lc").value = log.correct != null ? log.correct : "";
+  document.getElementById("lp").value = log.pages || "";
+  document.getElementById("qfa").value = log.faTopic || "";
+  document.getElementById("quw").value = log.uwTopic || "";
+  
+  // Save the ID in the window so saveLog() knows we are updating
+  window.currentEditId = id;
+  window.scrollTo({top: 0, behavior: 'smooth'}); // Scroll up to the form
+  toast("Editing entry...");
+}
+
 
 function delLog(id){
   confirmSheet("Delete this entry?", "It will be removed from your history.", ()=>{
@@ -1609,11 +1643,30 @@ function confirmSheet(title,body,fn,btn){
     </div>`);
 }
 
-function editLog(id){ closeSheet(); quickLog(id); }
-function delLogEntry(id){
-  confirmSheet("Remove entry?", "This log will be deleted permanently.", () => {
+function editLog(id){
+  const log = S.studyLogs.find(x => x.id === id);
+  if(!log) return;
+  
+  // Fill the main form with the saved data
+  document.getElementById("ld").value = log.date;
+  document.getElementById("lq").value = log.q || "";
+  document.getElementById("lc").value = log.correct != null ? log.correct : "";
+  document.getElementById("lp").value = log.pages || "";
+  document.getElementById("qfa").value = log.faTopic || "";
+  document.getElementById("quw").value = log.uwTopic || "";
+  
+  // Save the ID in the window so saveLog() knows we are updating
+  window.currentEditId = id;
+  window.scrollTo({top: 0, behavior: 'smooth'}); // Scroll up to the form
+  toast("Editing entry...");
+}
+
+function delLog(id){
+  confirmSheet("Delete this entry?", "It will be removed from your history.", ()=>{
+    // Safely remove the entry using its unique ID
     S.studyLogs = S.studyLogs.filter(x => x.id !== id);
-    // Rebuild the daily aggregation
+    
+    // Completely wipe and rebuild the stats so deleted data doesn't stick around
     S.qlogs = {};
     S.studyLogs.forEach(log => {
       if(!S.qlogs[log.date]) S.qlogs[log.date] = { q:0, correct:null, pages:0, note:"" };
@@ -1623,9 +1676,11 @@ function delLogEntry(id){
       const notes = [log.faTopic, log.uwTopic].filter(Boolean).join(" / ");
       if(notes) S.qlogs[log.date].note = S.qlogs[log.date].note ? S.qlogs[log.date].note + " | " + notes : notes;
     });
+    
     save(true); toast("Entry removed"); renderAll();
   });
 }
+
 
 function quickLog(editId = null){ 
   const e=engine(), t=today(); 
