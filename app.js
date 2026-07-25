@@ -721,15 +721,17 @@ function renderLog(){
   const e=engine();
   const el=document.getElementById("p-log");
   const t=today();
-  const cur=S.qlogs[t]||{q:0,correct:null,pages:0,note:""};
+  const cur = {q:"", correct:"", pages:"", faTopic:"", uwTopic:""};
+const entries = [...(S.studyLogs||[])].sort((a,b)=>b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 
-  const entries=Object.entries(S.qlogs)
-    .filter(([,v])=>(+v.q||0)>0||(+v.pages||0)>0)
-    .sort((a,b)=>b[0].localeCompare(a[0]));
+const tot = entries.reduce((a,v)=>({
+  q:a.q+(+v.q||0), p:a.p+(+v.pages||0), c:a.c+(+v.correct||0), cd:a.cd+(v.correct!=null?(+v.q||0):0)
+}), {q:0,p:0,c:0,cd:0});
+const acc = tot.cd ? (tot.c/tot.cd*100) : null;
 
-  const tot=entries.reduce((a,[,v])=>({q:a.q+(+v.q||0),p:a.p+(+v.pages||0),
-    c:a.c+(+v.correct||0),cd:a.cd+(v.correct!=null&&v.correct!==""?(+v.q||0):0)}),{q:0,p:0,c:0,cd:0});
-  const acc=tot.cd? (tot.c/tot.cd*100):null;
+const faOpts = `<option value="">-- First Aid Topic --</option>` + FA_TOPICS.map(x=>`<option value="${x}">${x}</option>`).join("");
+const uwOpts = `<option value="">-- UWorld Topic --</option>` + UW_TOPICS.map(x=>`<option value="${x}">${x}</option>`).join("");
+
 
   el.innerHTML=`
   <div class="card">
@@ -798,23 +800,29 @@ function renderLog(){
     <div class="card-h"><h3>${I("log",{s:17,c:"var(--indigo-2)"})} History</h3>
       <span class="sub">${entries.length} entries · never deleted on close</span></div>
     <div class="rows">
-      ${entries.length? entries.map(([d,v])=>{
+          ${entries.length? entries.map((v)=>{
+        const d = v.date;
         const goal=e.goalQ||40, q=+v.q||0;
         const col=q>=goal?"var(--teal-2)":q>0?"var(--amber)":"var(--text-3)";
         const a=(v.correct!=null&&v.correct!=="")&&q? Math.round(v.correct/q*100):null;
         const pre = d<PRE_CUTOFF;
+
         return `<div class="row">
           <span class="dot" style="background:${col}"></span>
           <div class="main">
             <div class="a">${fmtD(d)} · ${dowShort(d)} ${pre?'<span class="pill info" style="margin-left:6px;font-size:9px;padding:2px 7px">EARLIER PREP</span>':''}</div>
-            <div class="b">${v.pages?`${v.pages} FA pages`:"no pages"}${a!=null?` · ${a}% correct`:""}${v.note?` · ${v.note}`:""}</div>
+            <div class="b">${v.pages?`${v.pages} FA pages `:""}${a!=null?` · ${a}% correct `:""}
+               ${v.uwTopic ? `<br><span style="color:var(--teal-2)">UW:</span> ${v.uwTopic}` : ''}
+               ${v.faTopic ? `<br><span style="color:var(--coral)">FA:</span> ${v.faTopic}` : ''}
+            </div>
           </div>
           <div class="end">
             <div class="v" style="color:${col}">${q}<span style="font-size:9.5px;color:var(--text-3);font-weight:600"> Q</span></div>
-            <button class="x" onclick="delLog('${d}')" aria-label="Delete">${I("trash",{s:14,c:"var(--text-3)"})}</button>
+            <button class="x" onclick="delLog('${v.id}')" aria-label="Delete">${I("trash",{s:14,c:"var(--text-3)"})}</button>
           </div>
         </div>`;
       }).join(""):`<div class="empty">${I("empty",{s:36})}<div>No entries yet. Log your first block above.</div></div>`}
+
     </div>
   </div>`;
 }
@@ -826,17 +834,47 @@ function saveLog(){
   const cRaw=document.getElementById("lc").value;
   const c=cRaw===""?null:+cRaw;
   const p=+document.getElementById("lp").value||0;
-  const n=document.getElementById("ln").value.trim();
-  if(!q&&!p&&!n){ toast("Nothing to save","bad"); return; }
-  if(c!=null&&c>q){ toast("Correct can't exceed questions","bad"); return; }
-  S.qlogs[d]={q,correct:c,pages:p,note:n};
+  const fa=document.getElementById("qfa").value;
+  const uw=document.getElementById("quw").value;
+  
+  if(!q&&!p&&!fa&&!uw){ toast("Nothing to save", "bad"); return; }
+  if(c!=null&&c>q){ toast("Correct can't exceed questions", "bad"); return; }
+
+  const entry = { id: d+"-"+Date.now(), date: d, q: q, correct: c, pages: p, faTopic: fa, uwTopic: uw };
+  S.studyLogs = S.studyLogs || [];
+  S.studyLogs.push(entry);
+
+  S.qlogs = {};
+  S.studyLogs.forEach(log => {
+    if(!S.qlogs[log.date]) S.qlogs[log.date] = { q:0, correct:null, pages:0, note:"" };
+    S.qlogs[log.date].q += log.q;
+    S.qlogs[log.date].pages += log.pages;
+    if(log.correct != null) S.qlogs[log.date].correct = (S.qlogs[log.date].correct || 0) + log.correct;
+    const notes = [log.faTopic, log.uwTopic].filter(Boolean).join(" / ");
+    if(notes) S.qlogs[log.date].note = S.qlogs[log.date].note ? S.qlogs[log.date].note + " | " + notes : notes;
+  });
+
   save(true); toast(`Saved ${fmtShort(d)} · ${q} Q`); renderAll();
 }
-function delLog(d){
-  confirmSheet("Delete this entry?",`${fmtD(d)} will be removed from your history.`,()=>{
-    delete S.qlogs[d]; save(true); toast("Entry removed"); renderAll();
+
+function delLog(id){
+  confirmSheet("Delete this entry?", "It will be removed from your history.", ()=>{
+    S.studyLogs = S.studyLogs.filter(x => x.id !== id);
+    
+    S.qlogs = {};
+    S.studyLogs.forEach(log => {
+      if(!S.qlogs[log.date]) S.qlogs[log.date] = { q:0, correct:null, pages:0, note:"" };
+      S.qlogs[log.date].q += log.q;
+      S.qlogs[log.date].pages += log.pages;
+      if(log.correct != null) S.qlogs[log.date].correct = (S.qlogs[log.date].correct || 0) + log.correct;
+      const notes = [log.faTopic, log.uwTopic].filter(Boolean).join(" / ");
+      if(notes) S.qlogs[log.date].note = S.qlogs[log.date].note ? S.qlogs[log.date].note + " | " + notes : notes;
+    });
+    
+    save(true); toast("Entry removed"); renderAll();
   });
 }
+
 
 /* ============================================================
    PAGE · NBME
@@ -1571,6 +1609,24 @@ function confirmSheet(title,body,fn,btn){
     </div>`);
 }
 
+function editLog(id){ closeSheet(); quickLog(id); }
+function delLogEntry(id){
+  confirmSheet("Remove entry?", "This log will be deleted permanently.", () => {
+    S.studyLogs = S.studyLogs.filter(x => x.id !== id);
+    // Rebuild the daily aggregation
+    S.qlogs = {};
+    S.studyLogs.forEach(log => {
+      if(!S.qlogs[log.date]) S.qlogs[log.date] = { q:0, correct:null, pages:0, note:"" };
+      S.qlogs[log.date].q += log.q;
+      S.qlogs[log.date].pages += log.pages;
+      if(log.correct != null) S.qlogs[log.date].correct = (S.qlogs[log.date].correct || 0) + log.correct;
+      const notes = [log.faTopic, log.uwTopic].filter(Boolean).join(" / ");
+      if(notes) S.qlogs[log.date].note = S.qlogs[log.date].note ? S.qlogs[log.date].note + " | " + notes : notes;
+    });
+    save(true); toast("Entry removed"); renderAll();
+  });
+}
+
 function quickLog(editId = null){ 
   const e=engine(), t=today(); 
   let c = {q:"", correct:"", pages:"", faTopic:"", uwTopic:"", date: t};
@@ -1668,7 +1724,7 @@ if("serviceWorker" in navigator && location.protocol.startsWith("http")){
 }
 
 /* expose for inline handlers */Object.assign(window,{
-  go, quickLog, quickSave, saveLog, delLog, bump, bumpPage, addNbme, delNbme,
+  go, quickLog, quickSave, editLog, delLogEntry, saveLog, delLog, bump, bumpPage, addNbme, delNbme,
   nbmeNamePrefill, setKind, setMode, setTarget, toggleRun, finishRun, resetRun, delSession,
   savePlan, saveSync, doUpdate, exportData, exportCSV, importData, copyData, wipe, closeSheet, confirmSheet,
   insights, projection, consistency, subjectStats, weekSummary, heatmap, missCost, S, save, renderAll,
