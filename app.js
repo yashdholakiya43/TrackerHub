@@ -14,25 +14,49 @@ const PHASE_START= "2026-08-01"; // phases begin here
 const PRE_CUTOFF = "2026-07-01"; // before this = "earlier preparation"
 
 /* ---------- default state ---------- */
+const FA_TOPICS = [
+  "Biochemistry", "Immunology", "Microbiology", "Pathology", "Pharmacology", 
+  "Public Health Sciences", "Cardiovascular", "Endocrine", "Gastrointestinal", 
+  "Hematology and Oncology", "Musculoskeletal, Skin, and Connective Tissue", 
+  "Neurology and Special Senses", "Psychiatry", "Renal", "Reproductive", 
+  "Respiratory", "Rapid Review"
+];
+
+const UW_TOPICS = [
+  "Biochemistry (General Principles)", "Genetics (General Principles)", "Microbiology (General Principles)", 
+  "Pathology (General Principles)", "Pharmacology (General Principles)", "Biostatistics & Epidemiology", 
+  "Poisoning & Environmental Exposure", "Psychiatric/Behavioral & Substance Use Disorder", 
+  "Social Sciences (Ethics/Legal/Professional)", "Miscellaneous (Multisystem)", "Allergy & Immunology", 
+  "Cardiovascular System", "Dermatology", "Ear, Nose & Throat (ENT)", "Endocrine, Diabetes & Metabolism", 
+  "Female Reproductive System & Breast", "Gastrointestinal & Nutrition", "Hematology & Oncology", 
+  "Infectious Diseases", "Male Reproductive System", "Nervous System", "Ophthalmology", 
+  "Pregnancy, Childbirth & Puerperium", "Pulmonary & Critical Care", "Renal, Urinary Systems & Electrolytes", 
+  "Rheumatology/Orthopedics & Sports"
+];
+
 const DEFAULT = {
   v: 3,
   settings:{
-    theme:"dark",
-    examDate:"",
-    faTotal:FA_TOTAL,
-    faStart:0,          // pages already done before tracking
-    uwStart:0,          // questions already done before tracking
-    uwTotal:UW_TOTAL,
-    dailyHourGoal:6,
-    minQ:30, maxQ:60,
-    syncUrl:"",         // remote JSON URL for one-tap update
-    lastSync:""
+    theme:"dark", examDate:"", faTotal:FA_TOTAL, faStart:0, uwStart:0, 
+    uwTotal:UW_TOTAL, dailyHourGoal:6, minQ:30, maxQ:60, syncUrl:"", lastSync:""
   },
-  qlogs:{},   // "YYYY-MM-DD": {q:Number, correct:Number|null, pages:Number, note:String}
-  hours:{},   // "YYYY-MM-DD": {block:sec, book:sec, lecture:sec}
-  nbme:[],    // {id,name,date,score,type,percentCorrect,note}
-  sessions:[] // {id,date,mode,sec,label}
+  qlogs:{}, 
+  hours:{}, 
+  nbme:[], 
+  sessions:[],
+  studyLogs:[] 
 };
+
+function migrate(s){
+  s.qlogs=s.qlogs||{};
+  s.hours=s.hours||{};
+  s.nbme=s.nbme||[];
+  s.sessions=s.sessions||[];
+  s.studyLogs=s.studyLogs||[];
+  s.v=3;
+  return s;
+}
+
 
 /* ---------- storage ---------- */
 let S = load();
@@ -46,9 +70,15 @@ function load(){
   }catch(e){ return structuredClone(DEFAULT); }
 }
 function migrate(s){
-  s.qlogs=s.qlogs||{}; s.hours=s.hours||{}; s.nbme=s.nbme||[]; s.sessions=s.sessions||[];
-  s.v=3; return s;
+  s.qlogs=s.qlogs||{};
+  s.hours=s.hours||{};
+  s.nbme=s.nbme||[];
+  s.sessions=s.sessions||[];
+  s.studyLogs=s.studyLogs||[];
+  s.v=3;
+  return s;
 }
+
 let saveT=null;
 function save(now){
   clearTimeout(saveT);
@@ -706,119 +736,182 @@ function renderLog(){
   const el=document.getElementById("p-log");
   const t=today();
   const cur=S.qlogs[t]||{q:0,correct:null,pages:0,note:""};
+  
+  // 1. Sort the new array for history
+  const entries = [...(S.studyLogs||[])].sort((a,b)=>b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  
+  // 2. Calculate totals from the new array
+  const tot=entries.reduce((a,v)=>({
+      q:a.q+(+v.q||0), p:a.p+(+v.pages||0), 
+      c:a.c+(+v.correct||0), cd:a.cd+(v.correct!=null&&v.correct!==""?(+v.q||0):0)
+  }), {q:0,p:0,c:0,cd:0});
+  const acc = tot.cd ? (tot.c/tot.cd*100) : null;
+  const uniqueDays = new Set(entries.map(x => x.date)).size;
 
-  const entries=Object.entries(S.qlogs)
-    .filter(([,v])=>(+v.q||0)>0||(+v.pages||0)>0)
-    .sort((a,b)=>b[0].localeCompare(a[0]));
-
-  const tot=entries.reduce((a,[,v])=>({q:a.q+(+v.q||0),p:a.p+(+v.pages||0),
-    c:a.c+(+v.correct||0),cd:a.cd+(v.correct!=null&&v.correct!==""?(+v.q||0):0)}),{q:0,p:0,c:0,cd:0});
-  const acc=tot.cd? (tot.c/tot.cd*100):null;
+  // 3. Generate Dropdown Options
+  const uwOpts = UW_TOPICS.map(x => `<option value="${x}">${x}</option>`).join("");
+  const faOpts = FA_TOPICS.map(x => `<option value="${x}">${x}</option>`).join("");
 
   el.innerHTML=`
-  <div class="card">
-    <div class="card-h"><h3>${I("edit",{s:17,c:"var(--teal-2)"})} Log today</h3>
+    <div class="card">
+      <div class="card-h"><h3>${I("edit",{s:17,c:"var(--teal-2)"})} Log today</h3>
       <span class="sub">${DOW[parse(t).getDay()]} · ${fmtD(t)}</span></div>
-    <div class="grid g2" style="gap:12px">
-      <div class="field">
-        <label class="fl">UWorld questions</label>
-        <input class="inp" type="number" inputmode="numeric" id="lq" min="0" max="500" value="${cur.q||""}" placeholder="0">
+      <div class="grid g2" style="gap:12px">
+        <div class="field">
+          <label class="fl">UWorld questions</label>
+          <input class="inp" type="number" inputmode="numeric" id="lq" min="0" max="500" value="" placeholder="0">
+        </div>
+        <div class="field">
+          <label class="fl">Correct</label>
+          <input class="inp" type="number" inputmode="numeric" id="lc" min="0" max="500" value="" placeholder="optional">
+        </div>
+        <div class="field">
+          <label class="fl">First Aid pages</label>
+          <input class="inp" type="number" inputmode="numeric" id="lp" min="0" max="300" value="" placeholder="0">
+        </div>
+        <div class="field">
+          <label class="fl">Date</label>
+          <input class="inp" type="date" id="ld" value="${t}">
+        </div>
+        <div class="field" style="margin-top:12px; grid-column: 1 / -1;">
+          <label class="fl">UWorld System / Topic</label>
+          <select class="inp" id="luw">
+            <option value="">Select UWorld Topic...</option>
+            ${uwOpts}
+          </select>
+        </div>
+        <div class="field" style="margin-top:12px; grid-column: 1 / -1;">
+          <label class="fl">First Aid System</label>
+          <select class="inp" id="lfa">
+            <option value="">Select First Aid System...</option>
+            ${faOpts}
+          </select>
+        </div>
       </div>
-      <div class="field">
-        <label class="fl">Correct</label>
-        <input class="inp" type="number" inputmode="numeric" id="lc" min="0" max="500" value="${cur.correct??""}" placeholder="optional">
+      <div class="chips" style="margin-top:14px">
+        ${[20,40,e.goalQ||40,80].filter((v,i,a)=>a.indexOf(v)===i).map(v=>
+          `<button class="chip" onclick="bump(${v})">${I("plus",{s:13})} ${v} Q</button>`).join("")}
+        <button class="chip" onclick="bumpPage(10)">${I("book",{s:13})} +10 pages</button>
       </div>
-      <div class="field">
-        <label class="fl">First Aid pages</label>
-        <input class="inp" type="number" inputmode="numeric" id="lp" min="0" max="300" value="${cur.pages||""}" placeholder="0">
+      <div class="btnrow" style="margin-top:14px">
+        <button class="btn pri" onclick="saveLog()">${I("check",{s:16,c:"#fff"})} Save entry</button>
       </div>
-      <div class="field">
-        <label class="fl">Date</label>
-        <input class="inp" type="date" id="ld" value="${t}">
-      </div>
+      <p class="hint">Entries are saved individually. You can log multiple sessions for the same day!</p>
     </div>
-    <div class="field" style="margin-top:12px">
-      <label class="fl">Note (topic / system)</label>
-      <input class="inp" id="ln" value="${(cur.note||"").replace(/"/g,"&quot;")}" placeholder="e.g. Cardio pharm, Sketchy Micro gram+">
-    </div>
-    <div class="chips" style="margin-top:14px">
-      ${[20,40,e.goalQ||40,80].filter((v,i,a)=>a.indexOf(v)===i).map(v=>
-        `<button class="chip" onclick="bump(${v})">${I("plus",{s:13})} ${v} Q</button>`).join("")}
-      <button class="chip" onclick="bumpPage(10)">${I("book",{s:13})} +10 pages</button>
-    </div>
-    <div class="btnrow" style="margin-top:14px">
-      <button class="btn pri" onclick="saveLog()">${I("check",{s:16,c:"#fff"})} Save entry</button>
-    </div>
-    <p class="hint">Entries are keyed by date — saving the same date again replaces it, so you can correct a number any time.</p>
-  </div>
 
-  <div class="grid g4">
-    <div class="stat"><div class="lab">${I("zap",{s:12})} Total Q</div><div class="val">${tot.q.toLocaleString()}</div><div class="note">logged here</div></div>
-    <div class="stat"><div class="lab">${I("book",{s:12})} Pages</div><div class="val">${tot.p.toLocaleString()}</div><div class="note">First Aid</div></div>
-    <div class="stat"><div class="lab">${I("target",{s:12})} Accuracy</div><div class="val">${acc!=null?acc.toFixed(0)+"%":"—"}</div><div class="note">${tot.cd?tot.cd+" scored":"add correct"}</div></div>
-    <div class="stat"><div class="lab">${I("log",{s:12})} Days</div><div class="val">${entries.length}</div><div class="note">with activity</div></div>
-  </div>
-
-  ${(()=>{const ss=subjectStats();return ss.length?`
-  <div class="card">
-    <div class="card-h"><h3>${I("target",{s:17,c:"var(--coral)"})} By system</h3>
-      <span class="sub">detected from your notes</span></div>
-    ${ss.slice(0,10).map(s=>{
-      const acc=s.acc;
-      const col=acc==null?"var(--text-3)":acc>=75?"var(--teal-2)":acc>=65?"var(--amber)":"var(--rose)";
-      return `<div class="subj">
-        <span class="nm">${s.name}</span>
-        <span class="tr"><span style="width:${acc!=null?clamp(acc,0,100):0}%;background:${col}"></span></span>
-        <span class="pc" style="color:${col}">${acc!=null?acc.toFixed(0)+"%":"—"}</span>
-      </div>`;}).join("")}
-    <p class="hint">Type a system name in the note field (e.g. "Cardio", "Micro", "Renal") and it's tracked here automatically. Accuracy needs the Correct field filled in.</p>
-  </div>`:`
-  <div class="card tight">
-    <div class="card-h"><h3>${I("target",{s:16,c:"var(--coral)"})} By system</h3></div>
-    <p class="hint" style="margin:0">Mention a system in your note — Cardio, Renal, Neuro, Micro, Pharm — and per-system accuracy appears here.</p>
-  </div>`})()}
-
-  <div class="card">
-    <div class="card-h"><h3>${I("log",{s:17,c:"var(--indigo-2)"})} History</h3>
-      <span class="sub">${entries.length} entries · never deleted on close</span></div>
-    <div class="rows">
-      ${entries.length? entries.map(([d,v])=>{
-        const goal=e.goalQ||40, q=+v.q||0;
-        const col=q>=goal?"var(--teal-2)":q>0?"var(--amber)":"var(--text-3)";
-        const a=(v.correct!=null&&v.correct!=="")&&q? Math.round(v.correct/q*100):null;
-        const pre = d<PRE_CUTOFF;
-        return `<div class="row">
-          <span class="dot" style="background:${col}"></span>
-          <div class="main">
-            <div class="a">${fmtD(d)} · ${dowShort(d)} ${pre?'<span class="pill info" style="margin-left:6px;font-size:9px;padding:2px 7px">EARLIER PREP</span>':''}</div>
-            <div class="b">${v.pages?`${v.pages} FA pages`:"no pages"}${a!=null?` · ${a}% correct`:""}${v.note?` · ${v.note}`:""}</div>
-          </div>
-          <div class="end">
-            <div class="v" style="color:${col}">${q}<span style="font-size:9.5px;color:var(--text-3);font-weight:600"> Q</span></div>
-            <button class="x" onclick="delLog('${d}')" aria-label="Delete">${I("trash",{s:14,c:"var(--text-3)"})}</button>
-          </div>
-        </div>`;
-      }).join(""):`<div class="empty">${I("empty",{s:36})}<div>No entries yet. Log your first block above.</div></div>`}
+    <div class="grid g4">
+      <div class="stat"><div class="lab">${I("zap",{s:12})} Total Q</div><div class="val">${tot.q.toLocaleString()}</div><div class="note">logged here</div></div>
+      <div class="stat"><div class="lab">${I("book",{s:12})} Pages</div><div class="val">${tot.p.toLocaleString()}</div><div class="note">First Aid</div></div>
+      <div class="stat"><div class="lab">${I("target",{s:12})} Accuracy</div><div class="val">${acc!=null?acc.toFixed(0)+"%":"="}</div><div class="note">${tot.cd?tot.cd+" scored":"add correct"}</div></div>
+      <div class="stat"><div class="lab">${I("log",{s:12})} Days</div><div class="val">${uniqueDays}</div><div class="note">with activity</div></div>
     </div>
-  </div>`;
+
+    ${(() => {
+       const ss=subjectStats();
+       return ss.length ? `
+       <div class="card">
+         <div class="card-h"><h3>${I("target",{s:17,c:"var(--coral)"})} By system</h3>
+         <span class="sub">detected from your topics</span></div>
+         ${ss.slice(0,10).map(s=>{
+           const acc=s.acc;
+           const col=acc==null?"var(--text-3)":acc>=75?"var(--teal-2)":acc>=65?"var(--amber)":"var(--rose)";
+           return \`<div class="subj">
+             <span class="nm">\${s.name}</span>
+             <span class="tr"><span style="width:\${acc!=null?clamp(acc,0,100):0}%;background:\${col}"></span></span>
+             <span class="pc" style="color:\${col}">\${acc!=null?acc.toFixed(0)+"%":"-"}</span>
+           </div>\`;
+         }).join("")}
+       </div>` : '';
+    })()}
+
+    <div class="card">
+      <div class="card-h"><h3>${I("log",{s:17,c:"var(--indigo-2)"})} History</h3>
+      <span class="sub">${entries.length} entries</span></div>
+      <div class="rows">
+        ${entries.length ? entries.map(v => {
+          const col=v.q>=40?"var(--teal-2)":v.q>0?"var(--amber)":"var(--text-3)";
+          const a=(v.correct!=null&&v.correct!=="")&&v.q ? Math.round(v.correct/v.q*100) : null;
+          return \`<div class="row">
+            <span class="dot" style="background:\${col}"></span>
+            <div class="main">
+              <div class="a">\${fmtD(v.date)} \${dowShort(v.date)}</div>
+              <div class="b">
+                \${v.uwTopic ? \`<span class="pill info" style="margin-right:6px">UW</span> \${v.uwTopic}<br>\` : ""}
+                \${v.faTopic && v.faTopic !== v.uwTopic ? \`<span class="pill good" style="margin-right:6px;margin-top:4px">FA</span> \${v.faTopic}<br>\` : ""}
+                \${v.pages ? \`FA pages:\${v.pages} \` : ""} \${a!=null ? \`• \${a}% correct\` : ""}
+              </div>
+            </div>
+            <div class="end">
+              <div class="v" style="color:\${col}">\${v.q||0}<span style="font-size:9.5px;color:var(--text-3);font-weight:600"> Q</span></div>
+              <button class="x" onclick="delLog('\${v.id}')" aria-label="Delete">${I("trash",{s:14,c:"var(--text-3)"})}</button>
+            </div>
+          </div>\`;
+        }).join("") : `<div class="empty">${I("empty",{s:36})}<div>No entries yet. Log your first block above.</div></div>`}
+      </div>
+    </div>
+  `;
 }
+
 function bump(n){ const i=document.getElementById("lq"); i.value=(+i.value||0)+n; }
 function bumpPage(n){ const i=document.getElementById("lp"); i.value=(+i.value||0)+n; }
+
 function saveLog(){
-  const d=document.getElementById("ld").value||today();
-  const q=+document.getElementById("lq").value||0;
-  const cRaw=document.getElementById("lc").value;
-  const c=cRaw===""?null:+cRaw;
-  const p=+document.getElementById("lp").value||0;
-  const n=document.getElementById("ln").value.trim();
-  if(!q&&!p&&!n){ toast("Nothing to save","bad"); return; }
-  if(c!=null&&c>q){ toast("Correct can't exceed questions","bad"); return; }
-  S.qlogs[d]={q,correct:c,pages:p,note:n};
-  save(true); toast(`Saved ${fmtShort(d)} · ${q} Q`); renderAll();
+  const d = document.getElementById("ld").value || today();
+  const q = +document.getElementById("lq").value || 0;
+  const cRaw = document.getElementById("lc").value;
+  const c = cRaw === "" ? null : +cRaw;
+  const p = +document.getElementById("lp").value || 0;
+  const uwT = document.getElementById("luw").value;
+  let faT = document.getElementById("lfa").value;
+
+  if(!q && !p) { toast("Nothing to save", "bad"); return; }
+  if(c !== null && c > q) { toast("Correct can't exceed questions", "bad"); return; }
+  
+  // Rule: If FA topic is empty but UW topic is selected, use UW topic for both
+  if(!faT && uwT) faT = uwT;
+
+  const newId = Date.now().toString(); // Creates a unique ID for this entry
+  S.studyLogs = S.studyLogs || [];
+  S.studyLogs.push({id: newId, date: d, q, correct: c, pages: p, uwTopic: uwT, faTopic: faT});
+
+  // Rebuild the legacy S.qlogs so your charts keep working
+  S.qlogs = {};
+  S.studyLogs.forEach(entry => {
+      if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
+      S.qlogs[entry.date].q += entry.q;
+      S.qlogs[entry.date].pages += entry.pages;
+      if(entry.correct !== null) S.qlogs[entry.date].correct += entry.correct;
+      let mergedNote = [entry.uwTopic, entry.faTopic].filter(Boolean).join(" / ");
+      if(mergedNote && !S.qlogs[entry.date].note.includes(mergedNote)) {
+         S.qlogs[entry.date].note += (S.qlogs[entry.date].note ? " | " : "") + mergedNote;
+      }
+  });
+
+  save(true); 
+  toast(`Saved entry for ${fmtShort(d)}`); 
+  renderAll();
 }
-function delLog(d){
-  confirmSheet("Delete this entry?",`${fmtD(d)} will be removed from your history.`,()=>{
-    delete S.qlogs[d]; save(true); toast("Entry removed"); renderAll();
+
+function delLog(id){
+  confirmSheet("Delete entry?", "This will be removed from your history.", () => {
+    S.studyLogs = (S.studyLogs || []).filter(x => x.id !== id);
+    
+    // Rebuild the legacy S.qlogs after deleting
+    S.qlogs = {};
+    S.studyLogs.forEach(entry => {
+        if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
+        S.qlogs[entry.date].q += entry.q;
+        S.qlogs[entry.date].pages += entry.pages;
+        if(entry.correct !== null) S.qlogs[entry.date].correct += entry.correct;
+        let mergedNote = [entry.uwTopic, entry.faTopic].filter(Boolean).join(" / ");
+        if(mergedNote && !S.qlogs[entry.date].note.includes(mergedNote)) {
+           S.qlogs[entry.date].note += (S.qlogs[entry.date].note ? " | " : "") + mergedNote;
+        }
+    });
+
+    save(true); 
+    toast("Entry removed"); 
+    renderAll();
   });
 }
 
@@ -1555,36 +1648,94 @@ function confirmSheet(title,body,fn,btn){
     </div>`);
 }
 
-function quickLog(){
-  const e=engine(), t=today(), c=S.qlogs[t]||{};
+function quickLog(editId = null){
+  const e=engine(), t=today();
+  let log = {id: uid(), date: t, q: "", correct: "", pages: "", uwTopic: "", faTopic: ""};
+  
+  if(editId) {
+    const found = S.studyLogs.find(x => x.id === editId);
+    if(found) log = found;
+  }
+
+  const uwOpts = UW_TOPICS.map(x => `<option value="${x}" ${log.uwTopic===x?'selected':''}>${x}</option>`).join("");
+  const faOpts = FA_TOPICS.map(x => `<option value="${x}" ${log.faTopic===x?'selected':''}>${x}</option>`).join("");
+
   openSheet(`
-    <h3 style="font-family:var(--f-display);font-size:18px;margin:0 0 4px;letter-spacing:-.02em">Log today</h3>
-    <p style="color:var(--text-3);font-size:12px;margin:0 0 18px">${DOW[parse(t).getDay()]} · ${fmtD(t)} · goal ${e.goalQ} Q</p>
-    <div class="grid g2" style="gap:12px">
-      <div class="field"><label class="fl">UWorld Q</label>
-        <input class="inp" type="number" inputmode="numeric" id="qq" value="${c.q||""}" placeholder="0"></div>
-      <div class="field"><label class="fl">Correct</label>
-        <input class="inp" type="number" inputmode="numeric" id="qc" value="${c.correct??""}" placeholder="optional"></div>
-      <div class="field"><label class="fl">FA pages</label>
-        <input class="inp" type="number" inputmode="numeric" id="qp" value="${c.pages||""}" placeholder="0"></div>
-      <div class="field"><label class="fl">Note</label>
-        <input class="inp" id="qn" value="${(c.note||"").replace(/"/g,"&quot;")}" placeholder="topic"></div>
+    <div class="card-h mt0"><h3 style="margin-bottom:0">${editId ? 'Edit' : 'Log'} ${DOW[parse(log.date).getDay()]} · ${fmtD(log.date)}</h3></div>
+    <input type="hidden" id="ql-id" value="${log.id}">
+    <input type="hidden" id="ql-date" value="${log.date}">
+    
+    <div class="grid g2" style="margin-bottom:14px">
+      <div>
+        <label class="fl">UWorld Q</label>
+        <input class="inp" type="number" inputmode="numeric" id="qq" value="${log.q||""}" placeholder="0">
+      </div>
+      <div>
+        <label class="fl">Correct</label>
+        <input class="inp" type="number" inputmode="numeric" id="qc" value="${log.correct??""}" placeholder="optional">
+      </div>
     </div>
-    <div class="btnrow" style="margin-top:18px">
+    
+    <label class="fl">UWorld System / Topic</label>
+    <select class="inp" id="quw" style="margin-bottom:14px">
+      <option value="">Select UWorld Topic...</option>
+      ${uwOpts}
+    </select>
+    
+    <div style="margin-bottom:14px">
+      <label class="fl">FA Pages</label>
+      <input class="inp" type="number" inputmode="numeric" id="qp" value="${log.pages||""}" placeholder="0">
+    </div>
+    
+    <label class="fl">First Aid System</label>
+    <select class="inp" id="qfa" style="margin-bottom:20px">
+      <option value="">Select First Aid System...</option>
+      ${faOpts}
+    </select>
+    
+    <div class="btnrow">
       <button class="btn sec" onclick="closeSheet()">Cancel</button>
       <button class="btn pri" onclick="quickSave()">${I("check",{s:16,c:"#fff"})} Save</button>
-    </div>`);
+    </div>
+  `);
 }
+
 function quickSave(){
-  const t=today();
-  const q=+document.getElementById("qq").value||0;
-  const cr=document.getElementById("qc").value;
-  const p=+document.getElementById("qp").value||0;
-  const n=document.getElementById("qn").value.trim();
-  if(cr!==""&&+cr>q){ toast("Correct can't exceed questions","bad"); return; }
-  S.qlogs[t]={q,correct:cr===""?null:+cr,pages:p,note:n};
-  save(true); closeSheet(); toast(`${q} questions logged`); renderAll();
+  const id = document.getElementById("ql-id").value;
+  const d = document.getElementById("ql-date").value;
+  const q = +document.getElementById("qq").value||0;
+  const cr = document.getElementById("qc").value;
+  const p = +document.getElementById("qp").value||0;
+  const uwT = document.getElementById("quw").value;
+  let faT = document.getElementById("qfa").value;
+  
+  if(cr!=="" && +cr>q){ return toast("Correct can't exceed questions","bad"); }
+  
+  if(!faT && uwT) faT = uwT;
+
+  S.studyLogs = S.studyLogs.filter(x => x.id !== id);
+  if(q > 0 || p > 0) {
+      S.studyLogs.push({id, date: d, q, correct: cr===""?null:+cr, pages: p, uwTopic: uwT, faTopic: faT});
+  }
+
+  S.qlogs = {};
+  S.studyLogs.forEach(entry => {
+      if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
+      S.qlogs[entry.date].q += entry.q;
+      S.qlogs[entry.date].pages += entry.pages;
+      if(entry.correct !== null) S.qlogs[entry.date].correct += entry.correct;
+      let mergedNote = [entry.uwTopic, entry.faTopic].filter(Boolean).join(" / ");
+      if(mergedNote && !S.qlogs[entry.date].note.includes(mergedNote)) {
+         S.qlogs[entry.date].note += (S.qlogs[entry.date].note ? " | " : "") + mergedNote;
+      }
+  });
+
+  save(true);
+  closeSheet();
+  toast(`Entry saved`);
+  renderAll();
 }
+
 
 /* ---------- boot ---------- */
 document.getElementById("btnTheme").addEventListener("click",toggleTheme);
@@ -1613,14 +1764,34 @@ if("serviceWorker" in navigator && location.protocol.startsWith("http")){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 
-/* expose for inline handlers */Object.assign(window,{
-  go, quickLog, quickSave, saveLog, delLog, bump, bumpPage, addNbme, delNbme,
+function delLogEntry(id){
+    confirmSheet("Delete entry?", "This will permanently remove these questions and pages from your timeline.", () => {
+        S.studyLogs = S.studyLogs.filter(x => x.id !== id);
+        
+        S.qlogs = {};
+        S.studyLogs.forEach(entry => {
+            if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
+            S.qlogs[entry.date].q += entry.q;
+            S.qlogs[entry.date].pages += entry.pages;
+            if(entry.correct !== null) S.qlogs[entry.date].correct += entry.correct;
+        });
+        
+        save(true);
+        toast("Entry deleted");
+        renderAll();
+    });
+}
+
+/* expose for inline handlers */
+Object.assign(window, {
+  go, quickLog, quickSave, delLogEntry, saveLog, delLog, bump, bumpPage, addNbme, delNbme,
   nbmeNamePrefill, setKind, setMode, setTarget, toggleRun, finishRun, resetRun, delSession,
   savePlan, saveSync, doUpdate, exportData, exportCSV, importData, copyData, wipe, closeSheet, confirmSheet,
   insights, projection, consistency, subjectStats, weekSummary, heatmap, missCost, S, save, renderAll,
   openManualTimeSheet,
   saveManualTime
 });
+
 
 
 /* ============================================================
