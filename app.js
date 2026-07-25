@@ -1,6 +1,6 @@
 /* ============================================================
    STEP 1 PACE  ·  single-file study tracker
-   Data model version 3
+   Data model version 3.2
    ============================================================ */
 const APP_VERSION = "3.2.0";
 const KEY = "step1pace.v3";
@@ -47,17 +47,6 @@ const DEFAULT = {
   studyLogs:[] 
 };
 
-function migrate(s){
-  s.qlogs=s.qlogs||{};
-  s.hours=s.hours||{};
-  s.nbme=s.nbme||[];
-  s.sessions=s.sessions||[];
-  s.studyLogs=s.studyLogs||[];
-  s.v=3;
-  return s;
-}
-
-
 /* ---------- storage ---------- */
 let S = load();
 function load(){
@@ -75,6 +64,24 @@ function migrate(s){
   s.nbme=s.nbme||[];
   s.sessions=s.sessions||[];
   s.studyLogs=s.studyLogs||[];
+  
+  // CRITICAL FIX: Safe Migration for Historical Logs
+  // Ensure legacy qlogs are converted to studyLogs so they aren't wiped out!
+  const studyLogDates = new Set(s.studyLogs.map(x => x.date));
+  for (const [date, data] of Object.entries(s.qlogs)) {
+      if (!studyLogDates.has(date) && (data.q > 0 || data.pages > 0)) {
+          s.studyLogs.push({
+              id: "legacy_" + date,
+              date: date,
+              q: data.q || 0,
+              correct: (data.correct != null && data.correct !== "") ? data.correct : null,
+              pages: data.pages || 0,
+              uwTopic: data.note || "",
+              faTopic: ""
+          });
+      }
+  }
+  
   s.v=3;
   return s;
 }
@@ -213,7 +220,7 @@ function engine(){
 function firstActive(){
   // Filter for activity occurring on or after PHASE_START (August 1, 2026)
   const activeKeys = [...new Set([...Object.keys(S.qlogs), ...Object.keys(S.hours)])].filter(k => {
-    if (k < PHASE_START) return false; // Ignore pre-cutoff/earlier prep dates for official pace tracking baseline
+    if (k < PHASE_START) return false; 
     const d = S.qlogs[k], h = S.hours[k];
     return (d && ((+d.q||0) > 0 || (+d.pages||0) > 0)) || (h && (h.block || h.book || h.lecture));
   }).sort();
@@ -443,7 +450,6 @@ function progressBar(title, done, total, pacePct, grad, sub){
     </div>
   </div>`;
 }
-
 /* ============================================================
    PAGE · HOME
    ============================================================ */
@@ -471,40 +477,34 @@ function renderHome(){
   const statusQ = e.deltaQ>=0 ? "good":"bad";
   const days5=lastNDays(5);
 
-  // 14-day pace chart data
-  // Generate a full span from your start date to your exam date
-const spanDays = [];
-const chartLabels = [];
-const totalSpan = diffD(e.start, e.exam);
+  // Dynamic pace chart data
+  const spanDays = [];
+  const chartLabels = [];
+  const totalSpan = diffD(e.start, e.exam);
 
-for(let i = 0; i <= totalSpan; i++) {
-    const d = addD(e.start, i);
-    spanDays.push(d);
-    chartLabels.push(fmtShort(d)); // Generates the short date labels
-}
+  for(let i = 0; i <= totalSpan; i++) {
+      const d = addD(e.start, i);
+      spanDays.push(d);
+      chartLabels.push(fmtShort(d));
+  }
 
-let cum = (S.settings.uwStart || 0);
-// Count any activity before the official 'start' date to keep the baseline accurate
-const before = Object.entries(S.qlogs).filter(([k]) => k < e.start).reduce((a, [, v]) => a + (+v.q || 0), 0);
-cum += before;
+  let cum = (S.settings.uwStart || 0);
+  const before = Object.entries(S.qlogs).filter(([k]) => k < e.start).reduce((a, [, v]) => a + (+v.q || 0), 0);
+  cum += before;
 
-const actual = [], target = [];
-const perDay = (e.totalQ - (S.settings.uwStart || 0)) / e.totalDays;
+  const actual = [], target = [];
+  const perDay = (e.totalQ - (S.settings.uwStart || 0)) / e.totalDays;
 
-spanDays.forEach(d => {
-    // Only plot 'actual' data up to today so the line stops cleanly
-    if (d <= e.today) {
-        cum += +((S.qlogs[d] || {}).q || 0);
-        actual.push(cum);
-    } else {
-        actual.push(null); 
-    }
-    
-    // The target line always extends to the exam date
-    const el2 = clamp(diffD(e.start, d), 0, e.totalDays);
-    target.push((S.settings.uwStart || 0) + perDay * el2);
-});
-
+  spanDays.forEach(d => {
+      if (d <= e.today) {
+          cum += +((S.qlogs[d] || {}).q || 0);
+          actual.push(cum);
+      } else {
+          actual.push(null); 
+      }
+      const el2 = clamp(diffD(e.start, d), 0, e.totalDays);
+      target.push((S.settings.uwStart || 0) + perDay * el2);
+  });
 
    const nbmeLast=[...S.nbme].sort((a,b)=>b.date.localeCompare(a.date))[0];
 
@@ -738,7 +738,7 @@ function renderLog(){
   const cur=S.qlogs[t]||{q:0,correct:null,pages:0,note:""};
   
   // 1. Sort the new array for history
-  const entries = [...(S.studyLogs||[])].sort((a,b)=>b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  const entries = [...(S.studyLogs||[])].sort((a,b)=>(b.date||"").localeCompare(a.date||"") || (b.id||"").localeCompare(a.id||""));
   
   // 2. Calculate totals from the new array
   const tot=entries.reduce((a,v)=>({
@@ -815,11 +815,11 @@ function renderLog(){
          ${ss.slice(0,10).map(s=>{
            const acc=s.acc;
            const col=acc==null?"var(--text-3)":acc>=75?"var(--teal-2)":acc>=65?"var(--amber)":"var(--rose)";
-           return \`<div class="subj">
-             <span class="nm">\${s.name}</span>
-             <span class="tr"><span style="width:\${acc!=null?clamp(acc,0,100):0}%;background:\${col}"></span></span>
-             <span class="pc" style="color:\${col}">\${acc!=null?acc.toFixed(0)+"%":"-"}</span>
-           </div>\`;
+           return `<div class="subj">
+             <span class="nm">${s.name}</span>
+             <span class="tr"><span style="width:${acc!=null?clamp(acc,0,100):0}%;background:${col}"></span></span>
+             <span class="pc" style="color:${col}">${acc!=null?acc.toFixed(0)+"%":"-"}</span>
+           </div>`;
          }).join("")}
        </div>` : '';
     })()}
@@ -831,21 +831,21 @@ function renderLog(){
         ${entries.length ? entries.map(v => {
           const col=v.q>=40?"var(--teal-2)":v.q>0?"var(--amber)":"var(--text-3)";
           const a=(v.correct!=null&&v.correct!=="")&&v.q ? Math.round(v.correct/v.q*100) : null;
-          return \`<div class="row">
-            <span class="dot" style="background:\${col}"></span>
+          return `<div class="row">
+            <span class="dot" style="background:${col}"></span>
             <div class="main">
-              <div class="a">\${fmtD(v.date)} \${dowShort(v.date)}</div>
+              <div class="a">${fmtD(v.date)} ${dowShort(v.date)}</div>
               <div class="b">
-                \${v.uwTopic ? \`<span class="pill info" style="margin-right:6px">UW</span> \${v.uwTopic}<br>\` : ""}
-                \${v.faTopic && v.faTopic !== v.uwTopic ? \`<span class="pill good" style="margin-right:6px;margin-top:4px">FA</span> \${v.faTopic}<br>\` : ""}
-                \${v.pages ? \`FA pages:\${v.pages} \` : ""} \${a!=null ? \`• \${a}% correct\` : ""}
+                ${v.uwTopic ? `<span class="pill info" style="margin-right:6px">UW</span> ${v.uwTopic}<br>` : ""}
+                ${v.faTopic && v.faTopic !== v.uwTopic ? `<span class="pill good" style="margin-right:6px;margin-top:4px">FA</span> ${v.faTopic}<br>` : ""}
+                ${v.pages ? `FA pages:${v.pages} ` : ""} ${a!=null ? `• ${a}% correct` : ""}
               </div>
             </div>
             <div class="end">
-              <div class="v" style="color:\${col}">\${v.q||0}<span style="font-size:9.5px;color:var(--text-3);font-weight:600"> Q</span></div>
-              <button class="x" onclick="delLog('\${v.id}')" aria-label="Delete">${I("trash",{s:14,c:"var(--text-3)"})}</button>
+              <div class="v" style="color:${col}">${v.q||0}<span style="font-size:9.5px;color:var(--text-3);font-weight:600"> Q</span></div>
+              <button class="x" onclick="delLog('${v.id}')" aria-label="Delete">${I("trash",{s:14,c:"var(--text-3)"})}</button>
             </div>
-          </div>\`;
+          </div>`;
         }).join("") : `<div class="empty">${I("empty",{s:36})}<div>No entries yet. Log your first block above.</div></div>`}
       </div>
     </div>
@@ -876,7 +876,7 @@ function saveLog(){
 
   // Rebuild the legacy S.qlogs so your charts keep working
   S.qlogs = {};
-  S.studyLogs.forEach(entry => {
+  (S.studyLogs || []).forEach(entry => {
       if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
       S.qlogs[entry.date].q += entry.q;
       S.qlogs[entry.date].pages += entry.pages;
@@ -893,12 +893,12 @@ function saveLog(){
 }
 
 function delLog(id){
-  confirmSheet("Delete entry?", "This will be removed from your history.", () => {
+  confirmSheet("Delete entry?", "This will be permanently removed from your timeline.", () => {
     S.studyLogs = (S.studyLogs || []).filter(x => x.id !== id);
     
     // Rebuild the legacy S.qlogs after deleting
     S.qlogs = {};
-    S.studyLogs.forEach(entry => {
+    (S.studyLogs || []).forEach(entry => {
         if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
         S.qlogs[entry.date].q += entry.q;
         S.qlogs[entry.date].pages += entry.pages;
@@ -1057,7 +1057,7 @@ function renderWatch(){
   const stackR=d7.map(d=>hrs((S.hours[d]||{}).book||0));
   const stackL=d7.map(d=>hrs((S.hours[d]||{}).lecture||0));
 
-  const recent=[...S.sessions].sort((a,b)=>b.id.localeCompare(a.id)).slice(0,25);
+  const recent=[...S.sessions].sort((a,b)=>(b.id||"").localeCompare(a.id||"")).slice(0,25);
 
   const pct = TM.kind==="timer" ? clamp(TM.elapsed/Math.max(1,TM.target)*100,0,100)
                                 : clamp((TM.elapsed%3600)/3600*100,0,100);
@@ -1481,6 +1481,24 @@ function importData(inp){
       (d.nbme||[]).forEach(x=>{ if(!ids.has(x.id)) S.nbme.push(x); });
       const sid=new Set(S.sessions.map(x=>x.id));
       (d.sessions||[]).forEach(x=>{ if(!sid.has(x.id)) S.sessions.push(x); });
+      
+      // Auto-migrate newly imported historical data
+      const studyLogDates = new Set((d.studyLogs || []).map(x => x.date));
+      (d.studyLogs || []).forEach(x => S.studyLogs.push(x));
+      for (const [date, data] of Object.entries(d.qlogs || {})) {
+          if (!studyLogDates.has(date) && (data.q > 0 || data.pages > 0)) {
+              S.studyLogs.push({
+                  id: "legacy_imp_" + date,
+                  date: date,
+                  q: data.q || 0,
+                  correct: (data.correct != null && data.correct !== "") ? data.correct : null,
+                  pages: data.pages || 0,
+                  uwTopic: data.note || "",
+                  faTopic: ""
+              });
+          }
+      }
+
       save(true); applyTheme(); toast("Backup restored"); renderAll();
     }catch(e){ toast("That file isn't a valid backup","bad"); }
     inp.value="";
@@ -1653,7 +1671,7 @@ function quickLog(editId = null){
   let log = {id: uid(), date: t, q: "", correct: "", pages: "", uwTopic: "", faTopic: ""};
   
   if(editId) {
-    const found = S.studyLogs.find(x => x.id === editId);
+    const found = (S.studyLogs || []).find(x => x.id === editId);
     if(found) log = found;
   }
 
@@ -1713,13 +1731,13 @@ function quickSave(){
   
   if(!faT && uwT) faT = uwT;
 
-  S.studyLogs = S.studyLogs.filter(x => x.id !== id);
+  S.studyLogs = (S.studyLogs || []).filter(x => x.id !== id);
   if(q > 0 || p > 0) {
       S.studyLogs.push({id, date: d, q, correct: cr===""?null:+cr, pages: p, uwTopic: uwT, faTopic: faT});
   }
 
   S.qlogs = {};
-  S.studyLogs.forEach(entry => {
+  (S.studyLogs || []).forEach(entry => {
       if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
       S.qlogs[entry.date].q += entry.q;
       S.qlogs[entry.date].pages += entry.pages;
@@ -1764,27 +1782,9 @@ if("serviceWorker" in navigator && location.protocol.startsWith("http")){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 
-function delLogEntry(id){
-    confirmSheet("Delete entry?", "This will permanently remove these questions and pages from your timeline.", () => {
-        S.studyLogs = S.studyLogs.filter(x => x.id !== id);
-        
-        S.qlogs = {};
-        S.studyLogs.forEach(entry => {
-            if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
-            S.qlogs[entry.date].q += entry.q;
-            S.qlogs[entry.date].pages += entry.pages;
-            if(entry.correct !== null) S.qlogs[entry.date].correct += entry.correct;
-        });
-        
-        save(true);
-        toast("Entry deleted");
-        renderAll();
-    });
-}
-
 /* expose for inline handlers */
 Object.assign(window, {
-  go, quickLog, quickSave, delLogEntry, saveLog, delLog, bump, bumpPage, addNbme, delNbme,
+  go, quickLog, quickSave, saveLog, delLog, bump, bumpPage, addNbme, delNbme,
   nbmeNamePrefill, setKind, setMode, setTarget, toggleRun, finishRun, resetRun, delSession,
   savePlan, saveSync, doUpdate, exportData, exportCSV, importData, copyData, wipe, closeSheet, confirmSheet,
   insights, projection, consistency, subjectStats, weekSummary, heatmap, missCost, S, save, renderAll,
@@ -1925,5 +1925,6 @@ function insights(){
     if(days>0) out.push({ic:"award",col:"var(--violet)",tt:`${gain>=0?"+":""}${gain} points across ${days} days`,
       bd:`Between ${n[n.length-2].name} and ${n[n.length-1].name}. Roughly ${(gain/days*30).toFixed(0)} points a month at this rate.`});
   }
-  return out.slice(0,5);
-}
+return out.slice(0,5);
+ }
+
