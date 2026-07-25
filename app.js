@@ -1738,43 +1738,78 @@ function quickLog(editId = null){
   `); 
 }
 
-function quickSave(){
-  const id = document.getElementById("qId").value;
-  const dt = document.getElementById("qDate").value || today();
-  const q = +document.getElementById("qq").value || 0;
-  const cr = document.getElementById("qc").value;
-  const p = +document.getElementById("qp").value || 0;
-  const fa = document.getElementById("qfa").value;
-  const uw = document.getElementById("quw").value;
+function quickSave(editId = ""){ 
+  const t = today(); 
   
-  if(cr!=="" && +cr>q){ return toast("Correct can't exceed questions","bad"); }
+  // 1. SAFELY grab inputs. This prevents fatal crashes if an ID is missing.
+  // It checks for both Home Page IDs (qq) and Log Page IDs (lq)
+  const qNode = document.getElementById("qq") || document.getElementById("lq");
+  const cNode = document.getElementById("qc") || document.getElementById("lc");
+  const pNode = document.getElementById("qp") || document.getElementById("lp");
   
-  const entry = { id: id || uid(), date: dt, q, correct: cr===""?null:+cr, pages: p, faTopic: fa, uwTopic: uw };
+  const uwNode = document.getElementById("qUwTopic");
+  const faNode = document.getElementById("qFaTopic");
+
+  // Read values safely so the app never throws a "Cannot read property" error
+  const q = qNode ? +qNode.value || 0 : 0;
+  const cr = cNode ? cNode.value : ""; 
+  const p = pNode ? +pNode.value || 0 : 0;
   
-  if(id) {
-    const idx = S.studyLogs.findIndex(x => x.id === id);
-    if(idx > -1) S.studyLogs[idx] = entry;
-  } else {
-    S.studyLogs.push(entry);
+  let uw = uwNode ? uwNode.value.trim() : "";
+  let fa = faNode ? faNode.value.trim() : "";
+  
+  // 2. Auto-copy rule: First Aid copies UWorld if left blank
+  if (uw !== "" && fa === "") {
+    fa = uw;
   }
 
-  // Dynamically rebuild the daily aggregation for the legacy pace engine
-  S.qlogs = {};
-  S.studyLogs.forEach(log => {
-    if(!S.qlogs[log.date]) S.qlogs[log.date] = { q:0, correct:null, pages:0, note:"" };
-    S.qlogs[log.date].q += log.q;
-    S.qlogs[log.date].pages += log.pages;
-    if(log.correct != null) S.qlogs[log.date].correct = (S.qlogs[log.date].correct || 0) + log.correct;
-    // Store topics for subjectStats compatibility
-    const notes = [log.faTopic, log.uwTopic].filter(Boolean).join(" / ");
-    if(notes) S.qlogs[log.date].note = S.qlogs[log.date].note ? S.qlogs[log.date].note + " | " + notes : notes;
-  });
+  if(cr !== "" && +cr > q){ 
+    toast("Correct can't exceed questions", "bad"); 
+    return; 
+  }
 
+  // 3. Save safely to the multiple-entry array
+  if (editId) {
+    const idx = S.studyLogs.findIndex(x => x.id === editId);
+    if(idx > -1) {
+      S.studyLogs[idx] = { ...S.studyLogs[idx], q, correct: cr === "" ? null : +cr, pages: p, uwTopic: uw, faTopic: fa };
+    }
+  } else {
+    S.studyLogs.push({
+      id: uid(), date: t, q, correct: cr === "" ? null : +cr, pages: p, uwTopic: uw, faTopic: fa
+    });
+  }
+
+  // 4. Rebuild the legacy daily totals so your Home Page charts don't break
+  S.qlogs[t] = {q: 0, correct: null, pages: 0, note: ""};
+  let totalC = 0, totalScored = 0;
+  
+  S.studyLogs.filter(x => x.date === t).forEach(log => {
+    S.qlogs[t].q += (log.q || 0);
+    S.qlogs[t].pages += (log.pages || 0);
+    
+    let combinedNote = log.uwTopic || "";
+    if (log.faTopic && log.faTopic !== log.uwTopic) combinedNote += (combinedNote ? ` / ` : "") + log.faTopic;
+    if (combinedNote) S.qlogs[t].note += (S.qlogs[t].note ? ", " : "") + combinedNote;
+    
+    if (log.correct != null) {
+      totalC += log.correct;
+      totalScored += (log.q || 0);
+    }
+  });
+  
+  if (totalScored > 0) S.qlogs[t].correct = totalC;
+
+  // 5. Finalize and force UI refresh
   save(true);
-  closeSheet();
-  toast(`${q} questions logged`); 
-  renderAll(); 
+  if (typeof closeSheet === "function") closeSheet();
+  toast(editId ? "Entry updated" : `${q} questions logged`); 
+  
+  // Force rendering on both pages immediately
+  if (typeof renderAll === "function") renderAll(); 
+  if (typeof renderLog === "function" && document.getElementById("p-log")) renderLog();
 }
+
 
 /* ---------- boot ---------- */
 document.getElementById("btnTheme").addEventListener("click",toggleTheme);
