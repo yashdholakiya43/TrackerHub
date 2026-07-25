@@ -36,7 +36,8 @@ const DEFAULT = {
   qlogs:{},   // "YYYY-MM-DD": {q:Number, correct:Number|null, pages:Number, note:String}
   hours:{},   // "YYYY-MM-DD": {block:sec, book:sec, lecture:sec}
   nbme:[],    // {id,name,date,score,type,percentCorrect,note}
-  sessions:[] // {id,date,mode,sec,label}
+  sessions:[], // {id,date,mode,sec,label}
+  studyLogs:[]
 };
 
 /* ---------- storage ---------- */
@@ -813,7 +814,7 @@ const uwOpts = `<option value="">-- Select UWorld Topic --</option>` + UW_TOPICS
         const goal=e.goalQ||40, q=+v.q||0;
         const col=q>=goal?"var(--teal-2)":q>0?"var(--amber)":"var(--text-3)";
         const a=(v.correct!=null&&v.correct!=="")&&q? Math.round(v.correct/q*100):null;
-        const pre = d<PRE_CUTOFF;
+        const pre = false;
 
         return `<div class="row">
           <span class="dot" style="background:${col}"></span>
@@ -852,8 +853,13 @@ function saveLog(){
   const cRaw = document.getElementById("lc").value;
   const c = cRaw === "" ? null : +cRaw;
   const p = +document.getElementById("lp").value || 0;
-  const fa = elFA.value;
-  const uw = elUW.value;
+  let fa = elFA.value;
+const uw = elUW.value;
+
+if (uw !== "" && fa === "") {
+  fa = uw;
+}
+
 
   if(!q && !p && !fa && !uw){ toast("Nothing to save", "bad"); return; }
   if(c != null && c > q){ toast("Correct can't exceed questions", "bad"); return; }
@@ -1707,80 +1713,86 @@ function delLog(id){
 }
 
 
-function quickLog(editId = null){ 
-  const e=engine(), t=today(); 
-  let c = {q:"", correct:"", pages:"", faTopic:"", uwTopic:"", date: t};
+function quickLog(editId = null) { 
+  const e = engine(), t = today(); 
+  let c = {q: "", correct: "", pages: "", uwTopic: "", faTopic: ""};
   let title = `Log today ${DOW[parse(t).getDay()]} · ${fmtD(t)}`;
   
-  if(editId){
-    c = S.studyLogs.find(x => x.id === editId) || c;
-    title = `Edit entry for ${fmtShort(c.date)}`;
+  if (editId) {
+    const existing = S.studyLogs.find(x => x.id === editId);
+    if (existing) {
+      c = {...existing};
+      title = "Edit Log Entry";
+    }
   }
 
-  const faOpts = `<option value="">-- First Aid Topic --</option>` + FA_TOPICS.map(x=>`<option value="${x}" ${c.faTopic===x?'selected':''}>${x}</option>`).join("");
-  const uwOpts = `<option value="">-- UWorld Topic --</option>` + UW_TOPICS.map(x=>`<option value="${x}" ${c.uwTopic===x?'selected':''}>${x}</option>`).join("");
+  // Generate topics array safely
+  const sysOptions = (typeof SYSTEMS !== 'undefined' ? SYSTEMS : []).map(sys => `<option value="${sys}">`).join('');
 
   openSheet(`
-    <div class="card-h mb0"><h3 class="bignum">${title}</h3></div>
-    <input type="hidden" id="qId" value="${editId || ''}">
-    <input type="hidden" id="qDate" value="${c.date}">
-    <div class="grid g2" style="margin-top:16px">
-      <div class="field"><label class="fl">UWorld Q</label><input class="inp" type="number" id="qq" value="${c.q||""}" placeholder="0"></div>
-      <div class="field"><label class="fl">Correct</label><input class="inp" type="number" id="qc" value="${c.correct??""}" placeholder="opt"></div>
-      <div class="field" style="grid-column: 1 / -1"><label class="fl">UWorld Topic</label><select class="inp" id="quw">${uwOpts}</select></div>
-      <div class="field"><label class="fl">FA Pages</label><input class="inp" type="number" id="qp" value="${c.pages||""}" placeholder="0"></div>
-      <div class="field" style="grid-column: 1 / -1"><label class="fl">First Aid Topic</label><select class="inp" id="qfa">${faOpts}</select></div>
+    <h3>${title}</h3>
+    <div class="grid">
+      <div class="field"><label class="fl">UWorld Qs</label><input class="inp" type="number" inputmode="numeric" id="qq" value="${c.q||""}" placeholder="0"></div>
+      <div class="field"><label class="fl">Correct</label><input class="inp" type="number" inputmode="numeric" id="qc" value="${c.correct??""}" placeholder="optional"></div>
+      <div class="field"><label class="fl">FA Pages</label><input class="inp" type="number" inputmode="numeric" id="qp" value="${c.pages||""}" placeholder="0"></div>
     </div>
-    <div class="btnrow" style="margin-top:20px">
+    
+    <div class="grid g2" style="margin-top: 14px;">
+      <div class="field">
+         <label class="fl">UWorld Topic</label>
+         <input class="inp" type="text" id="qUwTopic" value="${(c.uwTopic||"").replace(/"/g,"&quot;")}" placeholder="Select or type..." list="topicList">
+      </div>
+      <div class="field">
+         <label class="fl">First Aid System</label>
+         <input class="inp" type="text" id="qFaTopic" value="${(c.faTopic||"").replace(/"/g,"&quot;")}" placeholder="Leave blank to copy UWorld..." list="topicList">
+      </div>
+    </div>
+
+    <datalist id="topicList">${sysOptions}</datalist>
+
+    <div class="btnrow mt0" style="margin-top:20px;">
       <button class="btn sec" onclick="closeSheet()">Cancel</button>
-      <button class="btn pri" onclick="quickSave()">${I("check",{s:16,c:"#fff"})} Save</button>
+      <button class="btn pri" onclick="quickSave('${editId || ''}')">Save</button>
     </div>
-  `); 
+  `);
 }
 
-function quickSave(editId = ""){ 
+
+function quickSave(editId = "") { 
   const t = today(); 
   
-  // 1. SAFELY grab inputs. This prevents fatal crashes if an ID is missing.
-  // It checks for both Home Page IDs (qq) and Log Page IDs (lq)
-  const qNode = document.getElementById("qq") || document.getElementById("lq");
-  const cNode = document.getElementById("qc") || document.getElementById("lc");
-  const pNode = document.getElementById("qp") || document.getElementById("lp");
-  
-  const uwNode = document.getElementById("qUwTopic");
-  const faNode = document.getElementById("qFaTopic");
+  // 1. Extract values safely to prevent null errors
+  const qVal = document.getElementById("qq") ? document.getElementById("qq").value : 0;
+  const cVal = document.getElementById("qc") ? document.getElementById("qc").value : "";
+  const pVal = document.getElementById("qp") ? document.getElementById("qp").value : 0;
+  const uwVal = document.getElementById("qUwTopic") ? document.getElementById("qUwTopic").value : "";
+  const faVal = document.getElementById("qFaTopic") ? document.getElementById("qFaTopic").value : "";
 
-  // Read values safely so the app never throws a "Cannot read property" error
-  const q = qNode ? +qNode.value || 0 : 0;
-  const cr = cNode ? cNode.value : ""; 
-  const p = pNode ? +pNode.value || 0 : 0;
+  const q = +qVal || 0;
+  const cr = cVal; 
+  const p = +pVal || 0;
+  let uw = uwVal.trim();
+  let fa = faVal.trim();
   
-  let uw = uwNode ? uwNode.value.trim() : "";
-  let fa = faNode ? faNode.value.trim() : "";
-  
-  // 2. Auto-copy rule: First Aid copies UWorld if left blank
-  if (uw !== "" && fa === "") {
-    fa = uw;
-  }
+  // 2. Apply auto-copy logic
+  if (uw !== "" && fa === "") fa = uw;
 
-  if(cr !== "" && +cr > q){ 
+  if (cr !== "" && +cr > q) { 
     toast("Correct can't exceed questions", "bad"); 
     return; 
   }
 
-  // 3. Save safely to the multiple-entry array
+  // 3. Save to the core array
   if (editId) {
     const idx = S.studyLogs.findIndex(x => x.id === editId);
-    if(idx > -1) {
+    if (idx > -1) {
       S.studyLogs[idx] = { ...S.studyLogs[idx], q, correct: cr === "" ? null : +cr, pages: p, uwTopic: uw, faTopic: fa };
     }
   } else {
-    S.studyLogs.push({
-      id: uid(), date: t, q, correct: cr === "" ? null : +cr, pages: p, uwTopic: uw, faTopic: fa
-    });
+    S.studyLogs.push({ id: uid(), date: t, q, correct: cr === "" ? null : +cr, pages: p, uwTopic: uw, faTopic: fa });
   }
 
-  // 4. Rebuild the legacy daily totals so your Home Page charts don't break
+  // 4. Rebuild the legacy daily object for your streak graphs
   S.qlogs[t] = {q: 0, correct: null, pages: 0, note: ""};
   let totalC = 0, totalScored = 0;
   
@@ -1797,18 +1809,18 @@ function quickSave(editId = ""){
       totalScored += (log.q || 0);
     }
   });
-  
   if (totalScored > 0) S.qlogs[t].correct = totalC;
 
-  // 5. Finalize and force UI refresh
+  // 5. Save and force screen updates
   save(true);
   if (typeof closeSheet === "function") closeSheet();
-  toast(editId ? "Entry updated" : `${q} questions logged`); 
+  toast(editId ? "Entry updated" : "Logged successfully"); 
   
-  // Force rendering on both pages immediately
+  // Aggressively re-render active views
   if (typeof renderAll === "function") renderAll(); 
   if (typeof renderLog === "function" && document.getElementById("p-log")) renderLog();
 }
+
 
 
 /* ---------- boot ---------- */
