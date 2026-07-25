@@ -722,7 +722,8 @@ function renderLog(){
   const el=document.getElementById("p-log");
   const t=today();
   const cur = {q:"", correct:"", pages:"", faTopic:"", uwTopic:""};
-const entries = [...(S.studyLogs||[])].sort((a,b)=>b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+const entries = (S.studyLogs||[]).filter(x => x && x.id).sort((a,b)=> String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)));
+
 
 const tot = entries.reduce((a,v)=>({
   q:a.q+(+v.q||0), p:a.p+(+v.pages||0), c:a.c+(+v.correct||0), cd:a.cd+(v.correct!=null?(+v.q||0):0)
