@@ -180,15 +180,22 @@ function engine(){
   return out;
 }
 
-/* first day with any activity, else 30 days before today, capped sensibly */
 function firstActive(){
-  const keys=[...Object.keys(S.qlogs),...Object.keys(S.hours)].filter(k=>{
-    const d=S.qlogs[k], h=S.hours[k];
-    return (d && ((+d.q||0)>0||(+d.pages||0)>0)) || (h && (h.block||h.book||h.lecture));
+  // Filter for activity occurring on or after PHASE_START (August 1, 2026)
+  const activeKeys = [...new Set([...Object.keys(S.qlogs), ...Object.keys(S.hours)])].filter(k => {
+    if (k < PHASE_START) return false; // Ignore pre-cutoff/earlier prep dates for official pace tracking baseline
+    const d = S.qlogs[k], h = S.hours[k];
+    return (d && ((+d.q||0) > 0 || (+d.pages||0) > 0)) || (h && (h.block || h.book || h.lecture));
   }).sort();
-  if(keys.length) return keys[0];
-  return today();
+
+  // If there's activity during or after Phase Start, use the earliest of those dates
+  if (activeKeys.length) return activeKeys[0];
+  
+  // Fallback: If no activity logged yet in August+, default to PHASE_START or today if before it
+  const t = today();
+  return t < PHASE_START ? PHASE_START : t;
 }
+
 
 /* ---------- PHASES ---------- */
 function phases(){
