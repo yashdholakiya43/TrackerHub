@@ -1571,35 +1571,73 @@ function confirmSheet(title,body,fn,btn){
     </div>`);
 }
 
-function quickLog(){
-  const e=engine(), t=today(), c=S.qlogs[t]||{};
+function quickLog(editId = null){ 
+  const e=engine(), t=today(); 
+  let c = {q:"", correct:"", pages:"", faTopic:"", uwTopic:"", date: t};
+  let title = `Log today ${DOW[parse(t).getDay()]} · ${fmtD(t)}`;
+  
+  if(editId){
+    c = S.studyLogs.find(x => x.id === editId) || c;
+    title = `Edit entry for ${fmtShort(c.date)}`;
+  }
+
+  const faOpts = `<option value="">-- First Aid Topic --</option>` + FA_TOPICS.map(x=>`<option value="${x}" ${c.faTopic===x?'selected':''}>${x}</option>`).join("");
+  const uwOpts = `<option value="">-- UWorld Topic --</option>` + UW_TOPICS.map(x=>`<option value="${x}" ${c.uwTopic===x?'selected':''}>${x}</option>`).join("");
+
   openSheet(`
-    <h3 style="font-family:var(--f-display);font-size:18px;margin:0 0 4px;letter-spacing:-.02em">Log today</h3>
-    <p style="color:var(--text-3);font-size:12px;margin:0 0 18px">${DOW[parse(t).getDay()]} · ${fmtD(t)} · goal ${e.goalQ} Q</p>
-    <div class="grid g2" style="gap:12px">
-      <div class="field"><label class="fl">UWorld Q</label>
-        <input class="inp" type="number" inputmode="numeric" id="qq" value="${c.q||""}" placeholder="0"></div>
-      <div class="field"><label class="fl">Correct</label>
-        <input class="inp" type="number" inputmode="numeric" id="qc" value="${c.correct??""}" placeholder="optional"></div>
-      <div class="field"><label class="fl">FA pages</label>
-        <input class="inp" type="number" inputmode="numeric" id="qp" value="${c.pages||""}" placeholder="0"></div>
-      <div class="field"><label class="fl">Note</label>
-        <input class="inp" id="qn" value="${(c.note||"").replace(/"/g,"&quot;")}" placeholder="topic"></div>
+    <div class="card-h mb0"><h3 class="bignum">${title}</h3></div>
+    <input type="hidden" id="qId" value="${editId || ''}">
+    <input type="hidden" id="qDate" value="${c.date}">
+    <div class="grid g2" style="margin-top:16px">
+      <div class="field"><label class="fl">UWorld Q</label><input class="inp" type="number" id="qq" value="${c.q||""}" placeholder="0"></div>
+      <div class="field"><label class="fl">Correct</label><input class="inp" type="number" id="qc" value="${c.correct??""}" placeholder="opt"></div>
+      <div class="field" style="grid-column: 1 / -1"><label class="fl">UWorld Topic</label><select class="inp" id="quw">${uwOpts}</select></div>
+      <div class="field"><label class="fl">FA Pages</label><input class="inp" type="number" id="qp" value="${c.pages||""}" placeholder="0"></div>
+      <div class="field" style="grid-column: 1 / -1"><label class="fl">First Aid Topic</label><select class="inp" id="qfa">${faOpts}</select></div>
     </div>
-    <div class="btnrow" style="margin-top:18px">
+    <div class="btnrow" style="margin-top:20px">
       <button class="btn sec" onclick="closeSheet()">Cancel</button>
       <button class="btn pri" onclick="quickSave()">${I("check",{s:16,c:"#fff"})} Save</button>
-    </div>`);
+    </div>
+  `); 
 }
+
 function quickSave(){
-  const t=today();
-  const q=+document.getElementById("qq").value||0;
-  const cr=document.getElementById("qc").value;
-  const p=+document.getElementById("qp").value||0;
-  const n=document.getElementById("qn").value.trim();
-  if(cr!==""&&+cr>q){ toast("Correct can't exceed questions","bad"); return; }
-  S.qlogs[t]={q,correct:cr===""?null:+cr,pages:p,note:n};
-  save(true); closeSheet(); toast(`${q} questions logged`); renderAll();
+  const id = document.getElementById("qId").value;
+  const dt = document.getElementById("qDate").value || today();
+  const q = +document.getElementById("qq").value || 0;
+  const cr = document.getElementById("qc").value;
+  const p = +document.getElementById("qp").value || 0;
+  const fa = document.getElementById("qfa").value;
+  const uw = document.getElementById("quw").value;
+  
+  if(cr!=="" && +cr>q){ return toast("Correct can't exceed questions","bad"); }
+  
+  const entry = { id: id || uid(), date: dt, q, correct: cr===""?null:+cr, pages: p, faTopic: fa, uwTopic: uw };
+  
+  if(id) {
+    const idx = S.studyLogs.findIndex(x => x.id === id);
+    if(idx > -1) S.studyLogs[idx] = entry;
+  } else {
+    S.studyLogs.push(entry);
+  }
+
+  // Dynamically rebuild the daily aggregation for the legacy pace engine
+  S.qlogs = {};
+  S.studyLogs.forEach(log => {
+    if(!S.qlogs[log.date]) S.qlogs[log.date] = { q:0, correct:null, pages:0, note:"" };
+    S.qlogs[log.date].q += log.q;
+    S.qlogs[log.date].pages += log.pages;
+    if(log.correct != null) S.qlogs[log.date].correct = (S.qlogs[log.date].correct || 0) + log.correct;
+    // Store topics for subjectStats compatibility
+    const notes = [log.faTopic, log.uwTopic].filter(Boolean).join(" / ");
+    if(notes) S.qlogs[log.date].note = S.qlogs[log.date].note ? S.qlogs[log.date].note + " | " + notes : notes;
+  });
+
+  save(true);
+  closeSheet();
+  toast(`${q} questions logged`); 
+  renderAll(); 
 }
 
 /* ---------- boot ---------- */
