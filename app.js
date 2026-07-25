@@ -14,6 +14,11 @@ const PHASE_START= "2026-08-01"; // phases begin here
 const PRE_CUTOFF = "2026-07-01"; // before this = "earlier preparation"
 
 /* ---------- default state ---------- */
+
+const FA_TOPICS = ["Biochemistry", "Immunology", "Microbiology", "Pathology", "Pharmacology", "Public Health Sciences", "Cardiovascular", "Endocrine", "Gastrointestinal", "Hematology and Oncology", "Musculoskeletal, Skin, and Connective Tissue", "Neurology and Special Senses", "Psychiatry", "Renal", "Reproductive", "Respiratory", "Rapid Review"];
+
+const UW_TOPICS = ["Biochemistry (General Principles)", "Genetics (General Principles)", "Microbiology (General Principles)", "Pathology (General Principles)", "Pharmacology (General Principles)", "Biostatistics & Epidemiology", "Poisoning & Environmental Exposure", "Psychiatric/Behavioral & Substance Use Disorder", "Social Sciences (Ethics/Legal/Professional)", "Miscellaneous (Multisystem)", "Allergy & Immunology", "Cardiovascular System", "Dermatology", "Ear, Nose & Throat (ENT)", "Endocrine, Diabetes & Metabolism", "Female Reproductive System & Breast", "Gastrointestinal & Nutrition", "Hematology & Oncology", "Infectious Diseases", "Male Reproductive System", "Nervous System", "Ophthalmology", "Pregnancy, Childbirth & Puerperium", "Pulmonary & Critical Care", "Renal, Urinary Systems & Electrolytes", "Rheumatology/Orthopedics & Sports"];
+
 const DEFAULT = {
   v: 3,
   settings:{
@@ -47,8 +52,19 @@ function load(){
 }
 function migrate(s){
   s.qlogs=s.qlogs||{}; s.hours=s.hours||{}; s.nbme=s.nbme||[]; s.sessions=s.sessions||[];
-  s.v=3; return s;
+  s.studyLogs=s.studyLogs||[];
+  
+  // Safe migration from old single-day format to new multiple-entry array
+  if(Object.keys(s.qlogs).length > 0 && s.studyLogs.length === 0){
+    for(const [d, v] of Object.entries(s.qlogs)){
+      s.studyLogs.push({
+        id: d+"-mig", date: d, q: v.q||0, correct: v.correct, pages: v.pages||0, uwTopic: v.note||"", faTopic: v.note||""
+      });
+    }
+  }
+  s.v=3.2; return s;
 }
+
 let saveT=null;
 function save(now){
   clearTimeout(saveT);
