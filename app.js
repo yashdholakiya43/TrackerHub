@@ -837,28 +837,43 @@ const uwOpts = `<option value="">-- Select UWorld Topic --</option>` + UW_TOPICS
 function bump(n){ const i=document.getElementById("lq"); i.value=(+i.value||0)+n; }
 function bumpPage(n){ const i=document.getElementById("lp"); i.value=(+i.value||0)+n; }
 function saveLog(){
-  const d=document.getElementById("ld").value||today();
-  const q=+document.getElementById("lq").value||0;
-  const cRaw=document.getElementById("lc").value;
-  const c=cRaw===""?null:+cRaw;
-  const p=+document.getElementById("lp").value||0;
-  const fa=document.getElementById("qfa").value;
-  const uw=document.getElementById("quw").value;
+  // 1. Safely grab the dropdowns (prevents the silent crash)
+  const elFA = document.getElementById("qfa");
+  const elUW = document.getElementById("quw");
+  
+  if (!elFA || !elUW) {
+    toast("Bug: Dropdowns not found on page!", "bad");
+    return;
+  }
 
-  if(!q&&!p&&!fa&&!uw){ toast("Nothing to save", "bad"); return; }
-  if(c!=null&&c>q){ toast("Correct can't exceed questions", "bad"); return; }
+  const d = document.getElementById("ld").value || today();
+  const q = +document.getElementById("lq").value || 0;
+  const cRaw = document.getElementById("lc").value;
+  const c = cRaw === "" ? null : +cRaw;
+  const p = +document.getElementById("lp").value || 0;
+  const fa = elFA.value;
+  const uw = elUW.value;
 
-  // Check if we are updating an existing entry or creating a new one
+  if(!q && !p && !fa && !uw){ toast("Nothing to save", "bad"); return; }
+  if(c != null && c > q){ toast("Correct can't exceed questions", "bad"); return; }
+
+  // 2. Ensure the save array actually exists BEFORE we try to edit
+  S.studyLogs = S.studyLogs || [];
+
+  // 3. Save the entry (whether new or edited)
   if (window.currentEditId) {
     const idx = S.studyLogs.findIndex(x => x.id === window.currentEditId);
-    if (idx > -1) S.studyLogs[idx] = { id: window.currentEditId, date: d, q, correct: c, pages: p, faTopic: fa, uwTopic: uw };
-    window.currentEditId = null; // Clear the edit mode
+    if (idx > -1) {
+      S.studyLogs[idx] = { id: window.currentEditId, date: d, q, correct: c, pages: p, faTopic: fa, uwTopic: uw };
+    } else {
+      S.studyLogs.push({ id: d+"-"+Date.now(), date: d, q, correct: c, pages: p, faTopic: fa, uwTopic: uw });
+    }
+    window.currentEditId = null; // Clear edit mode safely
   } else {
-    S.studyLogs = S.studyLogs || [];
     S.studyLogs.push({ id: d+"-"+Date.now(), date: d, q, correct: c, pages: p, faTopic: fa, uwTopic: uw });
   }
 
-  // Rebuild the daily stats
+  // 4. Rebuild the visual charts and totals
   S.qlogs = {};
   S.studyLogs.forEach(log => {
     if(!S.qlogs[log.date]) S.qlogs[log.date] = { q:0, correct:null, pages:0, note:"" };
@@ -869,7 +884,16 @@ function saveLog(){
     if(notes) S.qlogs[log.date].note = S.qlogs[log.date].note ? S.qlogs[log.date].note + " | " + notes : notes;
   });
 
-  save(true); toast(`Saved ${fmtShort(d)} · ${q} Q`); renderAll();
+  // 5. Clear the form inputs so you can log the next block immediately
+  document.getElementById("lq").value = "";
+  document.getElementById("lc").value = "";
+  document.getElementById("lp").value = "";
+  elFA.value = "";
+  elUW.value = "";
+
+  save(true); 
+  toast(`Saved ${fmtShort(d)} · ${q} Q`); 
+  renderAll();
 }
 
 function editLog(id){
