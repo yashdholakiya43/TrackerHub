@@ -1,17 +1,17 @@
 /* ============================================================
    STEP 1 PACE  ·  single-file study tracker
-   Data model version 3.2
+   Data model version 3.3
    ============================================================ */
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.3.0";
 const KEY = "step1pace.v3";
 
 /* ---------- constants from your brief ---------- */
-const UW_TOTAL   = 3657;   // UWorld questions
-const UW_ASSESS  = 3;      // UWorld self-assessments
-const FA_TOTAL   = 800;    // First Aid 2025 pages (editable in Plan)
-const BUFFER_DAYS= 25;     // finish FA + UWorld 25 days before exam
-const PHASE_START= "2026-08-01"; // phases begin here
-const PRE_CUTOFF = "2026-07-01"; // before this = "earlier preparation"
+const UW_TOTAL   = 3657;   
+const UW_ASSESS  = 3;      
+const FA_TOTAL   = 800;    
+const BUFFER_DAYS= 25;     
+const PHASE_START= "2026-08-01"; // Pace starts here
+const PRE_CUTOFF = "2026-08-01"; // Early prep ends here
 
 /* ---------- default state ---------- */
 const FA_TOPICS = [
@@ -40,11 +40,7 @@ const DEFAULT = {
     theme:"dark", examDate:"", faTotal:FA_TOTAL, faStart:0, uwStart:0, 
     uwTotal:UW_TOTAL, dailyHourGoal:6, minQ:30, maxQ:60, syncUrl:"", lastSync:""
   },
-  qlogs:{}, 
-  hours:{}, 
-  nbme:[], 
-  sessions:[],
-  studyLogs:[] 
+  qlogs:{}, hours:{}, nbme:[], sessions:[], studyLogs:[] 
 };
 
 /* ---------- storage ---------- */
@@ -59,37 +55,26 @@ function load(){
   }catch(e){ return structuredClone(DEFAULT); }
 }
 function migrate(s){
-  s.qlogs=s.qlogs||{};
-  s.hours=s.hours||{};
-  s.nbme=s.nbme||[];
-  s.sessions=s.sessions||[];
-  s.studyLogs=s.studyLogs||[];
+  s.qlogs=s.qlogs||{}; s.hours=s.hours||{}; s.nbme=s.nbme||[];
+  s.sessions=s.sessions||[]; s.studyLogs=s.studyLogs||[];
   
-  // CRITICAL FIX: Safe Migration for Historical Logs
-  // Ensure legacy qlogs are converted to studyLogs so they aren't wiped out!
   const studyLogDates = new Set(s.studyLogs.map(x => x.date));
   for (const [date, data] of Object.entries(s.qlogs)) {
       if (!studyLogDates.has(date) && (data.q > 0 || data.pages > 0)) {
           s.studyLogs.push({
-              id: "legacy_" + date,
-              date: date,
-              q: data.q || 0,
+              id: "legacy_" + date, date: date, q: data.q || 0,
               correct: (data.correct != null && data.correct !== "") ? data.correct : null,
-              pages: data.pages || 0,
-              uwTopic: data.note || "",
-              faTopic: ""
+              pages: data.pages || 0, uwTopic: data.note || "", faTopic: ""
           });
       }
   }
-  
-  s.v=3;
-  return s;
+  s.v=3; return s;
 }
 
 let saveT=null;
 function save(now){
   clearTimeout(saveT);
-  const go=()=>{ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast("Storage full — export a backup","bad"); } };
+  const go=()=>{ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast("Storage full","bad"); } };
   now ? go() : saveT=setTimeout(go,220);
 }
 
@@ -159,7 +144,7 @@ const I = (n,o={})=>{
 };
 
 /* ============================================================
-   PACE ENGINE
+   PACE ENGINE (REWRITTEN FOR AUG 1ST BASELINE)
    ============================================================ */
 function engine(){
   const st=S.settings, ex=st.examDate;
@@ -168,7 +153,6 @@ function engine(){
   const totalQ=st.uwTotal||UW_TOTAL;
   const totalP=st.faTotal||FA_TOTAL;
 
-  // completed
   const doneQ=(st.uwStart||0)+Object.values(S.qlogs).reduce((a,d)=>a+(+d.q||0),0);
   const doneP=(st.faStart||0)+Object.values(S.qlogs).reduce((a,d)=>a+(+d.pages||0),0);
 
@@ -182,25 +166,35 @@ function engine(){
   };
   if(!ex) return out;
 
-  const deadline=addD(ex,-BUFFER_DAYS);      // must finish FA+UWorld here
-  const start=firstActive();                  // when tracking effectively began
-  const totalDays=Math.max(1,diffD(start,deadline));
-  const elapsed=clamp(diffD(start,t),0,totalDays);
-  const left=Math.max(0,diffD(t,deadline));   // days remaining incl today? -> exclusive
-  const leftIncl=left+1;
+  // Pace officially starts exactly on 1st August 
+  const start = PHASE_START; 
+  const deadline = addD(ex,-BUFFER_DAYS);
+  const totalDays = Math.max(1,diffD(start,deadline));
+  const elapsed = clamp(diffD(start,t),0,totalDays);
+  const left = Math.max(0,diffD(t,deadline));
+  const leftIncl = left+1;
 
-  // where you SHOULD be today (linear pace from start baseline)
-  const baseQ=S.settings.uwStart||0, baseP=S.settings.faStart||0;
-  const shouldQ=clamp(baseQ+(totalQ-baseQ)*(elapsed/totalDays),0,totalQ);
-  const shouldP=clamp(baseP+(totalP-baseP)*(elapsed/totalDays),0,totalP);
+  // Tally everything done BEFORE 1st August to establish the baseline
+  let preQ = 0, preP = 0;
+  for (const [d, v] of Object.entries(S.qlogs)) {
+      if (d < start) {
+          preQ += +(v.q || 0);
+          preP += +(v.pages || 0);
+      }
+  }
 
-  // required daily rate to still finish on time
+  // Baseline combines your manual start offset + earlier prep logs
+  const baseQ = (st.uwStart||0) + preQ;
+  const baseP = (st.faStart||0) + preP;
+
+  // The required slope from the baseline
+  const shouldQ = clamp(baseQ + (totalQ - baseQ) * (elapsed / totalDays), 0, totalQ);
+  const shouldP = clamp(baseP + (totalP - baseP) * (elapsed / totalDays), 0, totalP);
+
   const needQ = leftIncl>0 ? Math.ceil(out.remQ/leftIncl) : out.remQ;
   const needP = leftIncl>0 ? Math.ceil(out.remP/leftIncl) : out.remP;
-
-  // target within 30-60 band, avg 40 — but honour the true requirement
   const bandQ = clamp(needQ, st.minQ||30, st.maxQ||60);
-  const goalQ = needQ>(st.maxQ||60) ? needQ : bandQ;   // if behind, show real need
+  const goalQ = needQ>(st.maxQ||60) ? needQ : bandQ;
 
   Object.assign(out,{
     deadline, start, totalDays, elapsed,
@@ -217,23 +211,6 @@ function engine(){
   return out;
 }
 
-function firstActive(){
-  // Filter for activity occurring on or after PHASE_START (August 1, 2026)
-  const activeKeys = [...new Set([...Object.keys(S.qlogs), ...Object.keys(S.hours)])].filter(k => {
-    if (k < PHASE_START) return false; 
-    const d = S.qlogs[k], h = S.hours[k];
-    return (d && ((+d.q||0) > 0 || (+d.pages||0) > 0)) || (h && (h.block || h.book || h.lecture));
-  }).sort();
-
-  // If there's activity during or after Phase Start, use the earliest of those dates
-  if (activeKeys.length) return activeKeys[0];
-  
-  // Fallback: If no activity logged yet in August+, default to PHASE_START or today if before it
-  const t = today();
-  return t < PHASE_START ? PHASE_START : t;
-}
-
-
 /* ---------- PHASES ---------- */
 function phases(){
   const ex=S.settings.examDate;
@@ -246,7 +223,6 @@ function phases(){
   if(span<=0) return [];
 
   if(!inWindow){
-    // still give a sensible 3-part split
     const a=Math.round(span*.42), b=Math.round(span*.78);
     return build([
       ["Phase 1 · Build",    anchor, addD(anchor,a-1), "First Aid systems + UWorld tutor mode. Sketchy Micro daily, B&B for weak systems."],
@@ -255,7 +231,6 @@ function phases(){
     ], dl);
   }
 
-  // Oct-end → Dec-end: four phases
   const a=Math.round(span*.30), b=Math.round(span*.56), c=Math.round(span*.80);
   return build([
     ["Phase 1 · Foundation", anchor, addD(anchor,a-1),
@@ -297,7 +272,6 @@ function streaks(){
       const q=+((S.qlogs[d]||{}).q||0);
       if(q>=goal){ run++; hits++; best=Math.max(best,run); } else if(d!==today()){ run=0; }
     }
-    // current streak walks back from today
     let d=today();
     if(!((+((S.qlogs[d]||{}).q||0))>=goal)) d=addD(d,-1);
     while((+((S.qlogs[d]||{}).q||0))>=goal){ cur++; d=addD(d,-1); }
@@ -334,7 +308,7 @@ function toast(msg,kind){
 }
 
 /* ============================================================
-   CHARTS — smooth curved line + opacity area, bold pace line
+   CHARTS
    ============================================================ */
 function smoothPath(pts){
   if(pts.length<2) return pts.length?`M${pts[0].x},${pts[0].y}`:"";
@@ -349,7 +323,6 @@ function smoothPath(pts){
   return d;
 }
 
-/* series: [{data:[n], color, fill:bool, bold:bool, dash:bool, name}] */
 function lineChart(series, labels, opt={}){
   const W=680, H=opt.h||230, L=opt.left||40, R=14, T=16, B=30;
   const iw=W-L-R, ih=H-T-B;
@@ -365,14 +338,12 @@ function lineChart(series, labels, opt={}){
   const uidn="g"+Math.random().toString(36).slice(2,7);
   let g="";
 
-  // grid
   const steps=4;
   for(let i=0;i<=steps;i++){
     const v=min+(max-min)*i/steps, y=Y(v);
     g+=`<line x1="${L}" y1="${y.toFixed(1)}" x2="${W-R}" y2="${y.toFixed(1)}" stroke="var(--grid)" stroke-width="1"/>`;
     g+=`<text x="${L-8}" y="${(y+3.5).toFixed(1)}" fill="var(--text-3)" font-size="10" text-anchor="end" font-family="var(--f-body)">${opt.fmtY?opt.fmtY(v):Math.round(v)}</text>`;
   }
-  // defs
   let defs="";
   series.forEach((s,si)=>{
     if(s.fill) defs+=`<linearGradient id="${uidn}${si}" x1="0" y1="0" x2="0" y2="1">
@@ -398,7 +369,6 @@ function lineChart(series, labels, opt={}){
     }
   });
 
-  // x labels (max 7)
   const every=Math.max(1,Math.ceil(n/6));
   labels.forEach((lb,i)=>{
     if(i%every!==0 && i!==n-1) return;
@@ -428,9 +398,6 @@ function barChart(values, labels, colors, opt={}){
   return `<div class="chart" style="height:${H}px"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg></div>`;
 }
 
-/* ============================================================
-   PROGRESS BAR with vertical pace line
-   ============================================================ */
 function progressBar(title, done, total, pacePct, grad, sub){
   const pct=total?clamp(done/total*100,0,100):0;
   const behind = pct < pacePct-0.4;
@@ -477,33 +444,55 @@ function renderHome(){
   const statusQ = e.deltaQ>=0 ? "good":"bad";
   const days5=lastNDays(5);
 
-  // Dynamic pace chart data
+  // NEW CHART LOGIC: 
+  // Graph begins exactly on the day of your FIRST ever log, and ends on your exam day.
+  const allDates = Object.keys(S.qlogs).sort();
+  let graphStart = allDates.length > 0 ? allDates[0] : PHASE_START;
+  if (graphStart > PHASE_START) graphStart = PHASE_START; 
+
+  const totalSpan = diffD(graphStart, e.exam);
   const spanDays = [];
   const chartLabels = [];
-  const totalSpan = diffD(e.start, e.exam);
 
-  for(let i = 0; i <= totalSpan; i++) {
-      const d = addD(e.start, i);
+  for (let i = 0; i <= totalSpan; i++) {
+      const d = addD(graphStart, i);
       spanDays.push(d);
       chartLabels.push(fmtShort(d));
   }
 
+  // Calculate Initial Baseline
   let cum = (S.settings.uwStart || 0);
-  const before = Object.entries(S.qlogs).filter(([k]) => k < e.start).reduce((a, [, v]) => a + (+v.q || 0), 0);
+  const before = Object.entries(S.qlogs).filter(([k]) => k < graphStart).reduce((a, [, v]) => a + (+v.q || 0), 0);
   cum += before;
 
   const actual = [], target = [];
-  const perDay = (e.totalQ - (S.settings.uwStart || 0)) / e.totalDays;
+  
+  // The pace line logic: Only starts rising from August 1st
+  let preQ = 0;
+  for (const [d, v] of Object.entries(S.qlogs)) {
+      if (d < PHASE_START) preQ += +(v.q || 0);
+  }
+  const basePaceQ = (S.settings.uwStart || 0) + preQ;
+  const paceDays = Math.max(1, diffD(PHASE_START, e.deadline));
+  const perDay = (e.totalQ - basePaceQ) / paceDays;
 
   spanDays.forEach(d => {
+      // 1. Plot Actual
       if (d <= e.today) {
           cum += +((S.qlogs[d] || {}).q || 0);
           actual.push(cum);
       } else {
           actual.push(null); 
       }
-      const el2 = clamp(diffD(e.start, d), 0, e.totalDays);
-      target.push((S.settings.uwStart || 0) + perDay * el2);
+      
+      // 2. Plot Pace Target
+      if (d < PHASE_START) {
+          // Flat line representing your early prep build-up
+          target.push(basePaceQ);
+      } else {
+          const elapsedPace = clamp(diffD(PHASE_START, d), 0, paceDays);
+          target.push(basePaceQ + (perDay * elapsedPace));
+      }
   });
 
    const nbmeLast=[...S.nbme].sort((a,b)=>b.date.localeCompare(a.date))[0];
@@ -737,10 +726,8 @@ function renderLog(){
   const t=today();
   const cur=S.qlogs[t]||{q:0,correct:null,pages:0,note:""};
   
-  // 1. Sort the new array for history
   const entries = [...(S.studyLogs||[])].sort((a,b)=>(b.date||"").localeCompare(a.date||"") || (b.id||"").localeCompare(a.id||""));
   
-  // 2. Calculate totals from the new array
   const tot=entries.reduce((a,v)=>({
       q:a.q+(+v.q||0), p:a.p+(+v.pages||0), 
       c:a.c+(+v.correct||0), cd:a.cd+(v.correct!=null&&v.correct!==""?(+v.q||0):0)
@@ -748,7 +735,6 @@ function renderLog(){
   const acc = tot.cd ? (tot.c/tot.cd*100) : null;
   const uniqueDays = new Set(entries.map(x => x.date)).size;
 
-  // 3. Generate Dropdown Options
   const uwOpts = UW_TOPICS.map(x => `<option value="${x}">${x}</option>`).join("");
   const faOpts = FA_TOPICS.map(x => `<option value="${x}">${x}</option>`).join("");
 
@@ -867,14 +853,12 @@ function saveLog(){
   if(!q && !p) { toast("Nothing to save", "bad"); return; }
   if(c !== null && c > q) { toast("Correct can't exceed questions", "bad"); return; }
   
-  // Rule: If FA topic is empty but UW topic is selected, use UW topic for both
   if(!faT && uwT) faT = uwT;
 
-  const newId = Date.now().toString(); // Creates a unique ID for this entry
+  const newId = Date.now().toString(); 
   S.studyLogs = S.studyLogs || [];
   S.studyLogs.push({id: newId, date: d, q, correct: c, pages: p, uwTopic: uwT, faTopic: faT});
 
-  // Rebuild the legacy S.qlogs so your charts keep working
   S.qlogs = {};
   (S.studyLogs || []).forEach(entry => {
       if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
@@ -896,7 +880,6 @@ function delLog(id){
   confirmSheet("Delete entry?", "This will be permanently removed from your timeline.", () => {
     S.studyLogs = (S.studyLogs || []).filter(x => x.id !== id);
     
-    // Rebuild the legacy S.qlogs after deleting
     S.qlogs = {};
     (S.studyLogs || []).forEach(entry => {
         if(!S.qlogs[entry.date]) S.qlogs[entry.date] = {q:0, correct:0, pages:0, note:""};
@@ -1239,7 +1222,7 @@ function delSession(id){
 }
 
 /* ============================================================
-   PAGE · PLAN  (settings, phases, backup, one-tap update)
+   PAGE · PLAN  
    ============================================================ */
 function renderPlan(){
   const el=document.getElementById("p-plan");
@@ -1342,19 +1325,19 @@ function renderPlan(){
         </div>`:""}
         <div class="ph-b">${p.body}</div>
       </div>`).join(""):`<div class="empty">${I("empty",{s:36})}<div>Your exam date leaves no room after 1 Aug 2026 — phases are hidden.</div></div>`}
-    <p class="hint">${I("info",{s:12})} Phases run from 1 August 2026 to your finish date. Anything logged before 1 July 2026 is treated as <b>earlier preparation</b> and sits outside the phase structure.</p>
+    <p class="hint">${I("info",{s:12})} Phases run from 1 August 2026 to your finish date. Anything logged before 1 August 2026 is treated as <b>earlier preparation</b> and automatically added to your baseline before pace calculating begins.</p>
   </div>
 
   ${(pre.n||pre.sec)?`
   <div class="card tight">
     <div class="card-h"><h3>${I("book",{s:16,c:"var(--text-3)"})} Earlier preparation</h3>
-      <span class="sub">before 1 Jul 2026</span></div>
+      <span class="sub">before 1 Aug 2026</span></div>
     <div class="grid g3">
       <div class="stat" style="min-height:76px"><div class="lab">Questions</div><div class="val" style="font-size:20px">${pre.q}</div></div>
       <div class="stat" style="min-height:76px"><div class="lab">Pages</div><div class="val" style="font-size:20px">${pre.p}</div></div>
       <div class="stat" style="min-height:76px"><div class="lab">Hours</div><div class="val" style="font-size:20px">${(pre.sec/3600).toFixed(1)}</div></div>
     </div>
-    <p class="hint">Counted in your totals, excluded from phase progress.</p>
+    <p class="hint">Counted in your totals and added to your pacing baseline on 1st August.</p>
   </div>`:""}
   `:""}
 
@@ -1368,7 +1351,7 @@ function renderPlan(){
       <button class="btn pri" onclick="doUpdate()">${I("sync",{s:16,c:"#fff"})} Update now</button>
       <button class="btn sec" onclick="saveSync()">${I("check",{s:16})} Save URL</button>
     </div>
-    <p class="hint">${st.lastSync?`Last checked ${st.lastSync}. `:""}Paste the URL where you host this app. One tap re-downloads the newest version and clears the cache — <b>your data stays exactly where it is</b>, because it lives in this device's storage, not in the file.</p>
+    <p class="hint">${st.lastSync?`Last checked ${st.lastSync}. `:""}Paste the URL where you host this app. One tap re-downloads the newest version and clears the cache.</p>
   </div>
 
   <div class="card">
@@ -1388,7 +1371,6 @@ function renderPlan(){
     </div>
     <hr class="sep">
     <button class="btn dan full" onclick="wipe()">${I("trash",{s:16})} Erase all data</button>
-    <p class="hint">Export before erasing. Import merges by date — newer entries win, nothing already saved is lost unless the same date exists in both files.</p>
   </div>`;
 }
 
@@ -1408,7 +1390,6 @@ function savePlan(){
 }
 function saveSync(){ S.settings.syncUrl=document.getElementById("sSync").value.trim(); save(true); toast("URL saved"); }
 
-/* one-tap update: keep data, refresh code */
 async function doUpdate(){
   const inp=document.getElementById("sSync");
   const url=(inp?inp.value.trim():S.settings.syncUrl)||S.settings.syncUrl;
@@ -1482,19 +1463,14 @@ function importData(inp){
       const sid=new Set(S.sessions.map(x=>x.id));
       (d.sessions||[]).forEach(x=>{ if(!sid.has(x.id)) S.sessions.push(x); });
       
-      // Auto-migrate newly imported historical data
       const studyLogDates = new Set((d.studyLogs || []).map(x => x.date));
       (d.studyLogs || []).forEach(x => S.studyLogs.push(x));
       for (const [date, data] of Object.entries(d.qlogs || {})) {
           if (!studyLogDates.has(date) && (data.q > 0 || data.pages > 0)) {
               S.studyLogs.push({
-                  id: "legacy_imp_" + date,
-                  date: date,
-                  q: data.q || 0,
+                  id: "legacy_imp_" + date, date: date, q: data.q || 0,
                   correct: (data.correct != null && data.correct !== "") ? data.correct : null,
-                  pages: data.pages || 0,
-                  uwTopic: data.note || "",
-                  faTopic: ""
+                  pages: data.pages || 0, uwTopic: data.note || "", faTopic: ""
               });
           }
       }
@@ -1588,10 +1564,7 @@ function saveManualTime() {
     label: customLabel ? `${customLabel} (Manual)` : `${defaultLabelText} (Manual)`
   });
 
-  save(true);
-  closeSheet();
-  toast(`Added ${hLabel(totalSeconds)} to ${mode}`);
-  renderAll();
+  save(true); closeSheet(); toast(`Added ${hLabel(totalSeconds)} to ${mode}`); renderAll();
 }
 
 /* ============================================================
@@ -1634,7 +1607,6 @@ function renderHeader(){
   document.getElementById("btnSync").innerHTML=I("sync",{s:16});
 }
 
-/* theme */
 function applyTheme(){
   document.documentElement.setAttribute("data-theme",S.settings.theme||"dark");
   document.querySelector('meta[name="theme-color"]').setAttribute("content",
@@ -1646,7 +1618,6 @@ function toggleTheme(){
   toast(S.settings.theme==="dark"?"Dark theme":"Light theme","info");
 }
 
-/* sheets */
 function openSheet(html){
   const ov=document.getElementById("ov"), sh=document.getElementById("sheet");
   sh.innerHTML=`<div class="grab"></div>`+html;
@@ -1728,7 +1699,6 @@ function quickSave(){
   let faT = document.getElementById("qfa").value;
   
   if(cr!=="" && +cr>q){ return toast("Correct can't exceed questions","bad"); }
-  
   if(!faT && uwT) faT = uwT;
 
   S.studyLogs = (S.studyLogs || []).filter(x => x.id !== id);
@@ -1748,23 +1718,14 @@ function quickSave(){
       }
   });
 
-  save(true);
-  closeSheet();
-  toast(`Entry saved`);
-  renderAll();
+  save(true); closeSheet(); toast(`Entry saved`); renderAll();
 }
 
-
-/* ---------- boot ---------- */
 document.getElementById("btnTheme").addEventListener("click",toggleTheme);
 document.getElementById("btnSync").addEventListener("click",()=>{ go("plan"); setTimeout(()=>toast("Update & backup are here","info"),400); });
 
-applyTheme();
-renderTabs();
-renderHeader();
-renderHome();
+applyTheme(); renderTabs(); renderHeader(); renderHome();
 
-/* backup nudge every 14 days */
 (function(){
   const last=localStorage.getItem(KEY+".backup");
   const n=Object.keys(S.qlogs).length;
@@ -1773,32 +1734,24 @@ renderHome();
   }
 })();
 
-/* keep header/day stamp fresh across midnight */
 let lastDay=today();
 setInterval(()=>{ if(today()!==lastDay){ lastDay=today(); renderAll(); } },30000);
 
-/* offline cache so it works with no signal */
 if("serviceWorker" in navigator && location.protocol.startsWith("http")){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 
-/* expose for inline handlers */
 Object.assign(window, {
   go, quickLog, quickSave, saveLog, delLog, bump, bumpPage, addNbme, delNbme,
   nbmeNamePrefill, setKind, setMode, setTarget, toggleRun, finishRun, resetRun, delSession,
   savePlan, saveSync, doUpdate, exportData, exportCSV, importData, copyData, wipe, closeSheet, confirmSheet,
   insights, projection, consistency, subjectStats, weekSummary, heatmap, missCost, S, save, renderAll,
-  openManualTimeSheet,
-  saveManualTime
+  openManualTimeSheet, saveManualTime
 });
 
-
-
 /* ============================================================
-   NEW FEATURES v3.1
+   NEW FEATURES
    ============================================================ */
-
-/* ---- 1. Subject / system tracking ---- */
 const SYSTEMS=["Cardio","Resp","Renal","GI","Neuro","Endo","Repro","Heme/Onc","MSK","Psych","Micro","Immuno","Biochem","Pharm","Path","Behavioral"];
 function subjectStats(){
   const m={};
@@ -1816,7 +1769,6 @@ function subjectStats(){
     acc: v.scored? v.c/v.scored*100 : null})).sort((a,b)=>b.q-a.q);
 }
 
-/* ---- 2. Projection: will you finish on time? ---- */
 function projection(){
   const e=engine();
   if(!e.ready) return null;
@@ -1834,7 +1786,6 @@ function projection(){
     onTrack: slack!=null && slack>=0};
 }
 
-/* ---- 3. Rest-day recovery: what a missed day costs ---- */
 function missCost(){
   const e=engine();
   if(!e.ready||e.daysToDeadline<2) return null;
@@ -1843,7 +1794,6 @@ function missCost(){
   return {now,after,delta:after-now};
 }
 
-/* ---- 4. Consistency score ---- */
 function consistency(){
   const d30=lastNDays(30);
   const logged=d30.filter(d=>(+((S.qlogs[d]||{}).q||0))>0).length;
@@ -1860,7 +1810,6 @@ function consistency(){
   return {logged,met,score,cv};
 }
 
-/* ---- 5. Best study hour heatmap (30 days) ---- */
 function heatmap(){
   const d=lastNDays(35);
   const e=engine(), goal=e.goalQ||40;
@@ -1871,7 +1820,6 @@ function heatmap(){
   });
 }
 
-/* ---- 6. Weekly summary ---- */
 function weekSummary(){
   const d7=lastNDays(7);
   const q=d7.reduce((a,d)=>a+(+((S.qlogs[d]||{}).q||0)),0);
@@ -1884,7 +1832,6 @@ function weekSummary(){
     qPct: pq? (q-pq)/pq*100 : null, active:d7.filter(d=>(+((S.qlogs[d]||{}).q||0))>0).length};
 }
 
-/* ---- 7. Insight generator ---- */
 function insights(){
   const e=engine(), out=[];
   if(!e.ready) return out;
@@ -1927,4 +1874,5 @@ function insights(){
   }
 return out.slice(0,5);
  }
+
 
